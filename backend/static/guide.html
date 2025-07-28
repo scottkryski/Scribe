@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scribe Guide</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script>
+        // Apply theme from localStorage before page load to prevent flashing
+        const savedTheme = localStorage.getItem('theme') || 'default';
+        document.documentElement.classList.add(`theme-${savedTheme}`);
+    </script>
+    <style>
+        /* Styles specific to the guide content for better readability */
+        body {
+            background: transparent; /* The iframe body should be transparent */
+            overflow-x: hidden;
+        }
+        .guide-prose {
+            color: var(--text-primary);
+        }
+        .guide-prose h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--glass-border);
+        }
+        .guide-prose h4 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+        .guide-prose p, .guide-prose li {
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        .guide-prose strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        .guide-prose a {
+            color: var(--accent-color);
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .guide-prose a:hover {
+            text-decoration: underline;
+        }
+        .guide-prose ul, .guide-prose ol {
+            list-style-position: inside;
+            padding-left: 0.5rem;
+        }
+        .guide-prose code {
+            background-color: var(--glass-bg);
+            padding: 0.2em 0.4em;
+            margin: 0;
+            font-size: 85%;
+            border-radius: 6px;
+            border: 1px solid var(--glass-border);
+        }
+    </style>
+</head>
+<body class="p-4 md:p-6">
+    <main class="guide-prose">
+        <div class="text-center mb-6">
+            <h2 class="text-3xl font-bold">How to Use Scribe</h2>
+            <p class="text-lg mt-2">Your guide to efficient, AI-assisted paper annotation.</p>
+        </div>
+
+        <!-- Getting Started Section -->
+        <div class="glass-effect rounded-2xl p-6 mb-8">
+            <h3>🚀 Getting Started: Initial Setup</h3>
+            <p>Before you can start annotating, please follow these essential setup steps:</p>
+            <ol class="list-decimal list-inside mt-4 space-y-3">
+                <li>
+                    <strong>Set up Google Sheets:</strong> Follow the detailed guide in the "Connecting to Google Sheets" section below. This is a one-time setup to allow Scribe to read and write data.
+                </li>
+                <li>
+                    <strong>Configure Scribe Settings:</strong> Navigate to the <strong>Settings</strong> page (⚙️ icon).
+                     <ul class="list-disc list-inside mt-2 ml-4 space-y-2">
+                        <li>Set your <strong>Annotator Name</strong> for tracking and collaboration.</li>
+                        <li>Set your <strong>Gemini API Key</strong> to enable the AI features. You can get a free key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>.</li>
+                        <li>Add your sheet to Scribe using the full URL.</li>
+                    </ul>
+                </li>
+                <li>
+                    <strong>Add Your Datasets:</strong> Go to the <strong>Settings</strong> page, find "Dataset Management", and click <strong>Open Data Folder</strong>. Place your <code>.jsonl</code> dataset files into this folder.
+                </li>
+            </ol>
+        </div>
+
+        <!-- Google Sheets Setup Section -->
+        <div class="glass-effect rounded-2xl p-6 mb-8">
+            <h3>📊 Connecting to Google Sheets</h3>
+            <p>To save your annotations, Scribe needs secure access to a Google Sheet. This requires a one-time setup in Google Cloud to create a "service account" (a bot) that Scribe can use.</p>
+
+            <h4>Part 1: Setting up Google Cloud & Service Account</h4>
+            <ol class="list-decimal list-inside mt-4 space-y-3">
+                <li><strong>Go to Google Cloud Console:</strong> Visit the <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> and sign in with your Google account.</li>
+                <li><strong>Create a New Project:</strong> At the top of the page, click the project selector and choose "New Project". Give it a name like "Scribe Annotator" and click "Create".</li>
+                <li>
+                    <strong>Enable APIs:</strong> You need to enable two APIs for your new project.
+                    <ul class="list-disc list-inside mt-2 ml-4 space-y-2">
+                        <li>Enable the <a href="https://console.cloud.google.com/apis/library/sheets.googleapis.com" target="_blank" rel="noopener noreferrer">Google Sheets API</a>.</li>
+                        <li>Enable the <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener noreferrer">Google Drive API</a>.</li>
+                    </ul>
+                    Click "Enable" for both.
+                </li>
+                <li>
+                    <strong>Create a Service Account:</strong>
+                    <ul class="list-disc list-inside mt-2 ml-4 space-y-2">
+                        <li>In the search bar, type "Service Accounts" and go to that page.</li>
+                        <li>Click "+ Create Service Account".</li>
+                        <li>Give it a name (e.g., "scribe-bot") and a description. Click "Create and Continue".</li>
+                        <li>For the "Role", select <strong>Project > Editor</strong>. Click "Continue", then "Done".</li>
+                    </ul>
+                </li>
+                <li>
+                    <strong>Generate a Key:</strong>
+                    <ul class="list-disc list-inside mt-2 ml-4 space-y-2">
+                        <li>Find your new service account in the list, click the three-dot menu under "Actions", and select "Manage keys".</li>
+                        <li>Click "Add Key" > "Create new key".</li>
+                        <li>Choose <strong>JSON</strong> as the key type and click "Create". A <code>.json</code> file will be downloaded.</li>
+                        <li><strong>Crucial:</strong> Rename this downloaded file to <code>credentials.json</code> and place it in the same folder as your Scribe application executable.</li>
+                    </ul>
+                </li>
+                 <li><strong>Copy the Service Account Email:</strong> On the Service Accounts page, copy the email address of the account you just created. It will look something like <code>scribe-bot@your-project-id.iam.gserviceaccount.com</code>.</li>
+            </ol>
+
+            <h4>Part 2: Preparing and Sharing Your Google Sheet</h4>
+             <ol class="list-decimal list-inside mt-4 space-y-3">
+                <li><strong>Create a Google Sheet:</strong> Go to <a href="https://sheets.new" target="_blank" rel="noopener noreferrer">sheets.new</a> to create a blank spreadsheet.</li>
+                <li><strong>Share the Sheet:</strong> Click the "Share" button at the top right. In the "Add people and groups" field, paste the service account email you copied earlier. Make sure it has the <strong>Editor</strong> role, and click "Share".</li>
+            </ol>
+            
+            <h4>Part 3: Adding the Sheet to Scribe</h4>
+             <ol class="list-decimal list-inside mt-4 space-y-3">
+                <li><strong>Go to Scribe Settings:</strong> Open Scribe and navigate to the <strong>Settings</strong> page (⚙️ icon).</li>
+                <li><strong>Add New Sheet:</strong> In the "Google Sheets Management" section, click "Add New Sheet".</li>
+                <li><strong>Enter Details:</strong> Give your sheet a memorable name (e.g., "Psychology Paper Annotations") and paste the <strong>full URL</strong> from your browser's address bar into the "Sheet URL" field.</li>
+                <li><strong>Save:</strong> Click "Save Sheet". It should now appear in the list.</li>
+                <li><strong>Start Annotating:</strong> Go back to the main Annotator view. You can now select your newly configured sheet from the dropdown menu to begin!</li>
+            </ol>
+        </div>
+        
+        <!-- Template Management Section -->
+        <div class="glass-effect rounded-2xl p-6 mb-8">
+            <h3>📝 Managing Annotation Templates</h3>
+            <p>Scribe allows you to create and customize your own annotation forms using templates.</p>
+            <ol class="list-decimal list-inside mt-4 space-y-3">
+                <li>
+                    <strong>Go to Settings:</strong> Navigate to the <strong>Settings</strong> page and find the "Annotation Templates" section.
+                </li>
+                <li>
+                    <strong>Select a Template:</strong> Use the dropdown to choose which template is active. The annotation form will be built based on this template.
+                </li>
+                <li>
+                    <strong>Customize:</strong> You can create new templates, delete old ones, or edit the fields of the selected template.
+                    <ul class="list-disc list-inside mt-2 ml-4 space-y-2">
+                        <li><strong>Add/Remove Fields:</strong> Use the buttons to add new annotation fields or delete existing ones.</li>
+                        <li><strong>Define Fields:</strong> For each field, you can set its Label, a unique ID, its type (Boolean toggle or Select dropdown), keywords for highlighting, and a description for the AI.</li>
+                        <li><strong>Save Changes:</strong> Always click <strong>Save Template</strong> after making changes.</li>
+                    </ul>
+                </li>
+            </ol>
+        </div>
+        
+        <!-- Workflow Section -->
+        <div class="glass-effect rounded-2xl p-6 mb-8">
+            <h3>🔄 The Annotation Workflow</h3>
+            <ol class="list-decimal list-inside mt-4 space-y-4">
+                <li><strong>Select a Sheet & Dataset:</strong> Choose your configured sheet and dataset from the dropdowns at the top right of the Annotator view.</li>
+                <li><strong>Load a Paper:</strong> The next available paper loads automatically. The PDF appears on the left, and the annotation form on the right.</li>
+                <li>
+                    <strong>Annotate:</strong>
+                    <ul class="list-disc list-inside mt-2 ml-4 space-y-2">
+                        <li><strong>Manual:</strong> Read the paper and fill out the form. Use the keyword highlighting tools (👁️ icon) to find relevant sections quickly.</li>
+                        <li><strong>AI-Assisted:</strong> Click <strong>Get AI Suggestions</strong>. The AI will analyze the PDF and pre-fill the form based on your active template. <strong>Always review the AI's suggestions for accuracy before submitting.</strong></li>
+                    </ul>
+                </li>
+                 <li><strong>Submit or Skip:</strong> When you're done, click <strong>Submit</strong>. If you can't annotate a paper (e.g., bad PDF, wrong language), click <strong>Skip</strong> to send it to the back of the queue.</li>
+            </ol>
+        </div>
+
+        <!-- Features Section -->
+        <div class="glass-effect rounded-2xl p-6 mb-8">
+            <h3>✨ Helpful Tools & Features</h3>
+            <ul class="mt-4 space-y-4">
+                <li>
+                    <svg class="w-5 h-5 inline-block align-middle mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <strong>AI Reasoning:</strong> After getting AI suggestions, hover over the question mark icon (❓) to see the AI's justification for its choice.
+                </li>
+                <li>
+                    <svg class="w-5 h-5 inline-block align-middle mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                    <strong>Keyword Highlighting:</strong> Click the eye icon (👁️) next to any field to highlight relevant keywords in the paper's text. Keywords are defined in the template editor.
+                </li>
+                <li>
+                    <svg class="w-5 h-5 inline-block align-middle mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h8m-4 10V5m-4 4h8" transform="rotate(90 12 12)"></path></svg>
+                    <strong>Resizable Panels:</strong> Drag the divider between the paper and annotation panels to resize them. Double-click to reset.
+                </li>
+                <li>
+                    <svg class="w-5 h-5 inline-block align-middle mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4h4 M20 8V4h-4 M4 16v4h4 M20 16v4h-4"></path></svg>
+                    <strong>Widescreen Mode:</strong> Click the expand icon (⛶) in the header to give the content more horizontal space.
+                </li>
+                <li>
+                    <svg class="w-5 h-5 inline-block align-middle mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <strong>Lock Timer:</strong> When you load a paper, it's reserved for you for 2 hours to prevent duplicate work. The countdown appears at the top right.
+                </li>
+            </ul>
+        </div>
+        
+    </main>
+</body>
+</html>

@@ -1,0 +1,556 @@
+<!-- backend/static/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scribe - Annotation Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script>
+        // Apply theme from localStorage before page load to prevent flashing
+        const savedTheme = localStorage.getItem('theme') || 'default';
+        document.documentElement.classList.add(`theme-${savedTheme}`);
+    </script>
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+        <div class="glass-effect rounded-3xl p-10 text-white text-center max-w-md">
+            <div class="loading-spinner mx-auto mb-6"></div>
+            <h2 id="loading-title" class="text-3xl font-bold mb-4">Processing...</h2>
+            <p id="loading-text" class="text-gray-300">Please wait while we prepare your documents.</p>
+        </div>
+    </div>
+
+    <div id="main-view" class="hidden">
+        <div id="update-notification-banner" class="hidden bg-indigo-600 text-white p-3 text-center fade-in">
+            <span class="font-semibold">A new version of Scribe is available!</span>
+            <button id="update-now-banner-btn" class="ml-4 bg-white text-indigo-700 font-bold py-1 px-4 rounded-full hover:bg-indigo-100 transition-colors">
+                Update Now
+            </button>
+        </div>
+        <div class="page-container mx-auto px-6 py-8" style="padding-top:10px;">
+            <!-- Header -->
+            <header class="glass-effect rounded-3xl p-4 mb-2 fade-in">
+                <div class="flex flex-col md:flex-row justify-between items-center gap-6">
+                    <div>
+                        <div class="flex items-center gap-4">
+                            <h1 class="text-4xl md:text-5xl font-bold text-white flex items-center gap-4">
+                                <img src="/static/assets/scribe_icon_transparent.png" alt="Scribe Logo" class="h-16 w-16 logo-img">
+                                <span>Scribe</span>
+                            </h1>
+                            <div class="flex items-center gap-1">
+                                <button class="nav-btn widescreen-toggle-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Toggle Widescreen">
+                                    <svg class="icon-expand w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4h4 M20 8V4h-4 M4 16v4h4 M20 16v4h-4"></path></svg>
+                                    <svg class="icon-compress w-10 h-10 hidden header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4v4H4 M16 4v4h4 M8 20v-4H4 M16 20v-4h4"></path></svg>
+                                </button>
+                                <button data-target-view="main-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Annotator">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                </button>
+                                <button data-target-view="stats-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Statistics">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <rect x="3" y="11" width="4" height="10" rx="1"/> <rect x="10" y="7" width="4" height="14" rx="1"/> <rect x="17" y="3" width="4" height="18" rx="1"/> </svg>
+                                </button>
+                                <button data-target-view="settings-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Settings">
+                                    <svg class="w-10 h-10 gear-icon header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <g>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        </g>
+                                    </svg>
+                                </button>
+                                <button data-target-view="guide-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Guide">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/> <path d="M12 3v6h6"/> </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <div id="lock-timer-display" class="hidden glass-effect rounded-xl px-2 py-2 text-white text-center bg-red-500/20 border border-red-500/30">
+                            <p class="text-red-200 text-xs">Paper Reserved For:</p>
+                            <h4 id="lock-timer-countdown" class="text-xl font-bold tabular-nums">02:00:00</h4>
+                        </div>
+
+                        <select id="sheet-selector" class="custom-select glass-effect text-white px-3 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all max-w-[200px] truncate">
+                            <option value="">Select Sheet</option>
+                        </select>
+
+                        <select id="dataset-selector" class="custom-select glass-effect text-white px-3 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all max-w-[200px] truncate" disabled>
+                            <option value="">Select Dataset</option>
+                        </select>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Main Content Area -->
+            <div id="main-content-grid">
+                <!-- Paper Content Panel -->
+                <div id="paper-view" class="glass-effect rounded-3xl p-8 fade-in flex flex-col hidden">
+                    <h2 id="paper-title" class="text-3xl font-bold text-white mb-4"></h2>
+                    
+                    <div id="no-datasets-message" class="hidden text-center glass-effect rounded-2xl p-8 my-auto">
+                        <h3 class="text-2xl font-bold text-yellow-300 mb-4">No Datasets Found</h3>
+                        <p class="text-yellow-200 mb-6">To get started, please add your `.jsonl` dataset files to the application's data folder.</p>
+                        <button id="open-data-folder-btn" type="button" class="btn-primary text-lg px-6 py-3">
+                            Open Data Folder
+                        </button>
+                    </div>                    
+
+                    <div id="paper-content-container" class="paper-content mt-4 pt-4 border-t border-white border-opacity-20 hidden">
+                        <div id="scroll-glow-top" class="scroll-glow scroll-glow-top"></div>
+                        <div id="abstract-container" class="bg-white bg-opacity-10 rounded-lg p-4 hidden">
+                            <h3 class="text-lg font-semibold text-white mb-3">Abstract</h3>
+                            <p id="paper-abstract" class="text-gray-200 leading-relaxed"></p>
+                        </div>
+                        <div id="pdf-viewer-container" class="bg-white bg-opacity-10 rounded-lg p-6 mb-6 hidden" style="margin-top: 24px;">
+                            <h3 class="text-lg font-semibold text-white mb-4">PDF Viewer</h3>
+                        </div>
+                        <div id="full-text-container" class="bg-white bg-opacity-10 rounded-lg p-6 hidden">
+                            <h3 class="text-lg font-semibold text-white mb-4">Full Text</h3>
+                            <div id="paper-full-text" class="text-gray-200 leading-relaxed space-y-4"></div>
+                        </div>
+                        <div id="scroll-glow-bottom" class="scroll-glow scroll-glow-bottom"></div>
+                    </div>
+                </div>
+
+                <!-- Resizer Handle -->
+                <div id="resize-handle" class="resizer" style="display: none;"></div>
+
+                <!-- Annotation Panel -->
+                <div id="annotation-view" class="glass-effect rounded-3xl p-6 fade-in flex flex-col sticky-annotation hidden">
+                    <form id="annotation-form" class="flex flex-col h-full">
+                        
+                        <div class="text-2xl font-bold text-white mb-4">Annotation Info</div>
+                        
+                        <div class="glass-effect rounded-2xl p-4 mb-4 space-y-3">
+                            <div class="flex flex-col">
+                                <label for="paper-doi" class="text-white font-medium text-sm mb-1">DOI:</label>
+                                <input type="text" id="paper-doi" name="paper-doi" class="w-full p-2 bg-white bg-opacity-10 rounded-lg text-gray-300 text-sm" readonly tabindex="-1">
+                            </div>
+                        </div>
+                        <div id="ai-suggestion-panel" class="glass-effect rounded-2xl p-4 mb-4">
+                            <button id="get-suggestions-btn" type="button" class="w-full glass-hover bg-gradient-to-r from-purple-500 to-indigo-600 text-white py-2 px-4 rounded-lg font-semibold">
+                                Get AI Suggestions
+                            </button>
+                        </div>
+                        
+                        <!-- Scrollable annotation labels -->
+                        <div id="annotation-fields-container" class="annotation-panel flex-grow space-y-4">
+                            <!-- JS will populate this -->
+                        </div>
+
+                        <!-- Sticky Bottom Buttons -->
+                        <div class="flex space-x-4 mt-6">
+                            <button id="submit-btn" type="button" class="flex-1 glass-hover bg-gradient-to-r from-green-500 to-green-600 text-white py-3 px-6 rounded-lg font-semibold">Submit</button>
+                            <button id="skip-btn" type="button" class="flex-1 glass-hover bg-gradient-to-r from-gray-500 to-gray-600 text-white py-3 px-6 rounded-lg font-semibold">Skip</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-view" class ="hidden">
+        <div class="page-container mx-auto px-6 py-8">
+            <!-- Header -->
+            <header class="glass-effect rounded-3xl p-4 mb-8 fade-in">
+                <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div>
+                        <div class="flex items-center gap-4">
+                            <h1 class="text-4xl font-bold text-white">Settings</h1>
+                             <div class="flex items-center gap-1">
+                                <button class="nav-btn widescreen-toggle-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Toggle Widescreen">
+                                    <svg class="icon-expand w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4h4 M20 8V4h-4 M4 16v4h4 M20 16v4h-4"></path></svg>
+                                    <svg class="icon-compress w-10 h-10 hidden header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4v4H4 M16 4v4h4 M8 20v-4H4 M16 20v-4h4"></path></svg>
+                                </button>
+                                <button data-target-view="main-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Annotator">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                </button>
+                                <button data-target-view="stats-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Statistics">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <rect x="3" y="11" width="4" height="10" rx="1"/> <rect x="10" y="7" width="4" height="14" rx="1"/> <rect x="17" y="3" width="4" height="18" rx="1"/> </svg>
+                                </button>
+                                <button data-target-view="settings-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Settings">
+                                    <svg class="w-10 h-10 gear-icon header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <g>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        </g>
+                                    </svg>
+                                </button>
+                                <button data-target-view="guide-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Guide">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/> <path d="M12 3v6h6"/> </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Settings Content -->
+            <main class="space-y-8">
+                <!-- First-time setup message -->
+                <div id="setup-message" class="hidden glass-effect rounded-3xl p-8 fade-in bg-yellow-500/10 border-yellow-500/20 text-yellow-200">
+                    <h2 class="text-2xl font-bold mb-4">Welcome to Scribe!</h2>
+                    <p>Before you can begin, please complete the initial setup below. You must provide an <strong class="text-white">Annotator Name</strong> and a <strong class="text-white">Gemini API Key</strong> to use the application.</p>
+                </div>
+
+                <!-- User & API Settings -->
+                <div class="glass-effect rounded-3xl p-8 fade-in text-white">
+                    <button class="settings-accordion-toggle active w-full flex justify-between items-center text-left focus:outline-none">
+                        <h2 class="text-2xl font-bold text-white">User Settings</h2>
+                        <svg class="accordion-icon w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div class="settings-accordion-content open">
+                        <div class="space-y-6">
+                            <!-- Annotator Name -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 items-center gap-4">
+                                <label for="annotator-name" class="font-medium">Annotator Name:</label>
+                                <input type="text" id="annotator-name" class="md:col-span-2 w-full p-2 bg-white bg-opacity-20 rounded-lg text-white placeholder-gray-400" placeholder="Enter your name">
+                            </div>
+                            <!-- Gemini API Key -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 items-start gap-4">
+                                <div class="flex flex-col">
+                                    <label for="gemini-api-key-input" class="font-medium">Gemini API Key:</label>
+                                    <p id="api-key-status" class="text-xs text-gray-400 mt-1">Checking status...</p>
+                                </div>
+                                <div class="md:col-span-2 flex items-center space-x-2">
+                                    <input type="password" id="gemini-api-key-input" class="flex-grow p-2 bg-white bg-opacity-20 rounded-lg text-white placeholder-gray-400" placeholder="Enter your Gemini API Key" autocomplete="new-password">
+                                    <button id="save-api-key-btn" type="button" class="btn-primary">Save</button>
+                                </div>
+                            </div>
+                            <!-- Default AI Model -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 items-center gap-4 pt-6 border-t border-white/10">
+                                <label for="gemini-model-selector" class="font-medium">Default AI Model:</label>
+                                <div class="md:col-span-2">
+                                    <select id="gemini-model-selector" class="w-full custom-select p-2 bg-white bg-opacity-20 rounded-lg text-white">
+                                        <option value="">-- Loading models... --</option>
+                                    </select>
+                                    <p class="text-xs text-gray-400 mt-1">Note: gemini-2.5-flash-lite is recommended for its balance of speed, accuracy, and higher free API limits.</p>
+                                    <p class="text-xs text-gray-400 mt-1">Flash and Pro may provide slightly higher accuracy at the cost of lower limits. 2.0 models should only be used as a fallback.</p>
+                                    <p class="text-xs text-gray-400 mt-1">Gemma models are added for local testing purposes and their accuracy is likely to suffer when given so much context.</p>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 items-center gap-4 pt-6 border-t border-white/10">
+                                <label class="font-medium">Application Version:</label>
+                                <div class="md:col-span-2">
+                                    <button id="check-for-updates-btn" type="button" class="btn-primary">Check for Updates</button>
+                                </div>
+                            </div>
+                            <!-- Strict PDF Loading Toggle -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 items-center gap-4 pt-6 border-t border-white/10">
+                                <div class="flex flex-col">
+                                    <label for="load-pdf-only-toggle" class="font-medium">Strict PDF Loading:</label>
+                                    <p class="text-xs text-gray-400 mt-1">If ON, only show papers where the PDF can be successfully loaded.</p>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="load-pdf-only-toggle" checked>
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <!-- Prioritize Incomplete Toggle -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 items-center gap-4 pt-6 border-t border-white/10">
+                                <div class="flex flex-col">
+                                    <label for="prioritize-incomplete-toggle" class="font-medium">Prioritize Incomplete:</label>
+                                    <p class="text-xs text-gray-400 mt-1">If ON, incomplete annotations from previous sessions appear first. Requires reloading the dataset.</p>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="prioritize-incomplete-toggle" checked>
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Google Sheets Management -->
+                <div class="glass-effect rounded-3xl p-8 fade-in text-white">
+                    <button class="settings-accordion-toggle w-full flex justify-between items-center text-left focus:outline-none">
+                        <h2 class="text-2xl font-bold text-white">Google Sheets Management</h2>
+                        <svg class="accordion-icon w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div class="settings-accordion-content">
+                        <div class="space-y-6">
+                            <p class="text-sm text-gray-300">Manage connections to your Google Sheets. Follow the User Guide for detailed setup instructions for your first sheet.</p>
+                            <!-- List of existing sheets -->
+                            <div id="sheets-list-container" class="space-y-2">
+                                <!-- JS will populate this -->
+                            </div>
+                            <!-- Add new sheet form -->
+                            <div id="add-sheet-form" class="hidden space-y-3 pt-4 border-t border-white/20">
+                                <input type="text" id="new-sheet-name" class="w-full p-2 bg-white bg-opacity-20 rounded-lg text-white placeholder-gray-400" placeholder="Sheet Name (e.g., Project Alpha)">
+                                <input type="text" id="new-sheet-id" class="w-full p-2 bg-white bg-opacity-20 rounded-lg text-white placeholder-gray-400" placeholder="Full Google Sheet URL">
+                                <div class="flex justify-end gap-2">
+                                    <button id="cancel-add-sheet-btn" type="button" class="btn-primary bg-gray-600 hover:bg-gray-700">Cancel</button>
+                                    <button id="save-new-sheet-btn" type="button" class="btn-primary bg-green-600 hover:bg-green-700">Save Sheet</button>
+                                </div>
+                            </div>
+                            <button id="add-new-sheet-btn" type="button" class="btn-primary w-full mt-4">Add New Sheet</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Dataset Management -->
+                <div class="glass-effect rounded-3xl p-8 fade-in text-white">
+                    <button class="settings-accordion-toggle w-full flex justify-between items-center text-left focus:outline-none">
+                        <h2 class="text-2xl font-bold text-white">Dataset Management</h2>
+                        <svg class="accordion-icon w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div class="settings-accordion-content">
+                        <div class="space-y-4">
+                            <p class="text-sm text-gray-300">
+                                Your datasets are loaded from <code>.jsonl</code> files. Click the button below to open the data folder, where you can add or remove your dataset files.
+                            </p>
+                            <div class="flex items-center gap-4">
+                                <button id="open-data-folder-btn-settings" type="button" class="btn-primary flex-grow">Open Data Folder</button>
+                                <button id="refresh-datasets-btn" type="button" class="btn-primary bg-indigo-600 hover:bg-indigo-700">Refresh List</button>
+                            </div>
+                            <p class="text-xs text-gray-400 mt-1">
+                                After adding files, click "Refresh List" to see them in the annotator dropdown without restarting the application.
+                            </p>
+                        </div>
+                    </div>
+                </div>                
+
+                <!-- Annotation Template Manager -->
+                <div class="glass-effect rounded-3xl p-8 fade-in text-white">
+                    <button class="settings-accordion-toggle w-full flex justify-between items-center text-left focus:outline-none">
+                        <h2 class="text-2xl font-bold text-white">Annotation Templates</h2>
+                        <svg class="accordion-icon w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div class="settings-accordion-content">
+                        <div class="space-y-6">
+                            <!-- Template Selection & Management -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 items-center gap-4">
+                                <label for="template-selector" class="font-medium">Active Template:</label>
+                                <div class="md:col-span-2 flex items-center gap-2">
+                                    <select id="template-selector" class="flex-grow custom-select p-2 bg-white bg-opacity-20 rounded-lg text-white">
+                                        <option value="">-- Loading templates... --</option>
+                                    </select>
+                                    <button id="new-template-btn" type="button" class="btn-primary" title="New Template">+</button>
+                                    <button id="delete-template-btn" type="button" class="btn-primary bg-red-600 hover:bg-red-700" title="Delete Template">🗑️</button>
+                                    <button id="refresh-templates-btn" type="button" class="btn-primary bg-indigo-600 hover:bg-indigo-700" title="Refresh List">🔄</button>
+                                </div>
+                            </div>
+                            <!-- Template Builder -->
+                            <div id="template-builder-container" class="space-y-4 pt-4 border-t border-white/10">
+                                <!-- JS will populate this -->
+                            </div>
+                            <!-- Action Buttons -->
+                            <div class="flex justify-end items-center gap-4 pt-4 border-t border-white/10">
+                                <button id="open-templates-folder-btn" type="button" class="btn-primary mr-auto">Open Folder</button>
+                                <button id="upload-template-btn" type="button" class="btn-primary bg-indigo-600 hover:bg-indigo-700">Upload</button>
+                                <input type="file" id="template-file-input" class="hidden" accept=".json">
+                                <button id="add-field-btn" type="button" class="btn-primary">Add Field</button>
+                                <button id="save-template-btn" type="button" class="btn-primary bg-green-600 hover:bg-green-700">Save Template</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Theme Settings -->
+                <div class="glass-effect rounded-3xl p-8 fade-in text-white">
+                    <button class="settings-accordion-toggle w-full flex justify-between items-center text-left focus:outline-none">
+                        <h2 class="text-2xl font-bold text-white">Theme</h2>
+                        <svg class="accordion-icon w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div class="settings-accordion-content">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 text-center">
+                            <!-- Default Theme -->
+                            <button data-theme="default" class="theme-btn p-4 rounded-lg border-2 border-transparent">
+                                <div class="w-full h-24 rounded-md bg-gradient-to-br from-purple-500 to-indigo-600 mb-3"></div>
+                                <h3 class="font-semibold">Default</h3>
+                            </button>
+                            <!-- Glass Theme -->
+                            <button data-theme="glass" class="theme-btn p-4 rounded-lg border-2 border-transparent">
+                                <div class="w-full h-24 rounded-md glass-preview mb-3"></div>
+                                <h3 class="font-semibold">Glass</h3>
+                            </button>
+                            <!-- Warm Theme -->
+                            <button data-theme="warm" class="theme-btn p-4 rounded-lg border-2 border-transparent">
+                                <div class="w-full h-24 rounded-md bg-[#F5F1E8] border-2 border-[#4D2E1A] mb-3"></div>
+                                <h3 class="font-semibold">Warm</h3>
+                            </button>
+                            <!-- Cyberpunk Theme -->
+                            <button data-theme="cyberpunk" class="theme-btn p-4 rounded-lg border-2 border-transparent">
+                                <div class="w-full h-24 rounded-md cyberpunk-preview mb-3"></div>
+                                <h3 class="font-semibold">Cyberpunk</h3>
+                            </button>
+                            <!-- Forest Theme -->
+                            <button data-theme="forest" class="theme-btn p-4 rounded-lg border-2 border-transparent">
+                                <div class="w-full h-24 rounded-md forest-preview mb-3"></div>
+                                <h3 class="font-semibold">Forest</h3>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+    </div>
+    
+    <div id="stats-view" class="hidden">
+        <div class="page-container mx-auto px-6 py-8">
+            <!-- Header -->
+            <header class="glass-effect rounded-3xl p-4 mb-8 fade-in">
+                <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                     <div>
+                        <div class="flex items-center gap-4">
+                            <h1 class="text-4xl font-bold text-white">Statistics</h1>
+                             <div class="flex items-center gap-1">
+                                <button class="nav-btn widescreen-toggle-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Toggle Widescreen">
+                                    <svg class="icon-expand w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4h4 M20 8V4h-4 M4 16v4h4 M20 16v4h-4"></path></svg>
+                                    <svg class="icon-compress w-10 h-10 hidden header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4v4H4 M16 4v4h4 M8 20v-4H4 M16 20v-4h4"></path></svg>
+                                </button>
+                                <button data-target-view="main-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Annotator">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                </button>
+                                <button data-target-view="stats-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Statistics">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <rect x="3" y="11" width="4" height="10" rx="1"/> <rect x="10" y="7" width="4" height="14" rx="1"/> <rect x="17" y="3" width="4" height="18" rx="1"/> </svg>
+                                </button>
+                                <button data-target-view="settings-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Settings">
+                                    <svg class="w-10 h-10 gear-icon header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <g>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        </g>
+                                    </svg>
+                                </button>
+                                <button data-target-view="guide-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Guide">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/> <path d="M12 3v6h6"/> </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+            
+            <!-- Stats Content -->
+            <main id="stats-dashboard" class="space-y-8">
+                <div id="stats-loading" class="text-center py-10">
+                    <div class="loading-spinner mx-auto mb-4"></div>
+                    <p>Loading latest statistics...</p>
+                </div>
+
+                <div id="stats-content" class="hidden space-y-8">
+                    <!-- Top-level Summary -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="glass-effect p-6 rounded-2xl">
+                            <h3 class="text-lg font-semibold text-gray-300">Total Annotations</h3>
+                            <p id="stats-total-annotations" class="text-4xl font-bold">0</p>
+                        </div>
+                        <div class="glass-effect p-6 rounded-2xl">
+                            <h3 class="text-lg font-semibold text-gray-300">Completed Annotations</h3>
+                            <p id="stats-completed-annotations" class="text-4xl font-bold">0</p>
+                        </div>
+                        <div class="glass-effect p-6 rounded-2xl">
+                            <h3 class="text-lg font-semibold text-gray-300">Incomplete Annotations</h3>
+                            <p id="stats-incomplete-annotations" class="text-4xl font-bold">0</p>
+                        </div>
+                    </div>
+
+                    <!-- Overall Annotation Breakdown -->
+                    <div class="glass-effect p-8 rounded-3xl">
+                        <h2 class="text-2xl font-bold mb-6 text-white">Overall Annotation Breakdown</h2>
+                        <div id="stats-overall-breakdown" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                            <!-- JS will populate this -->
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <!-- Document Type Distribution -->
+                        <div class="glass-effect p-8 rounded-3xl lg:col-span-1">
+                            <h2 class="text-2xl font-bold mb-6 text-white">Document Types</h2>
+                            <div id="stats-doc-type-dist" class="space-y-4">
+                                <!-- JS will populate this -->
+                            </div>
+                        </div>
+
+                        <!-- Community Stats -->
+                        <div class="glass-effect p-8 rounded-3xl lg:col-span-2">
+                            <h2 class="text-2xl font-bold mb-6 text-white">Community Stats</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div>
+                                    <h3 class="text-xl font-semibold mb-4 text-gray-200">Annotator Leaderboard</h3>
+                                    <div id="stats-leaderboard" class="space-y-3">
+                                        <!-- JS will populate this -->
+                                    </div>
+                                </div>
+                                <div>
+                                    <h3 class="text-xl font-semibold mb-4 text-gray-200">Annotations by Dataset</h3>
+                                    <div id="stats-dataset-dist" class="space-y-3">
+                                        <!-- JS will populate this -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                 <div id="stats-error" class="hidden text-center py-10 glass-effect rounded-2xl bg-red-500/10 border-red-500/20">
+                    <h3 class="text-xl font-bold text-red-300">Could not load statistics</h3>
+                    <p class="text-red-400 mt-2">There was an error communicating with the server. Please try again later.</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div id ="guide-view" class ="hidden">
+        <div class="page-container mx-auto px-6 py-8">
+            <!-- Header -->
+            <header class="glass-effect rounded-3xl p-4 mb-8 fade-in">
+                 <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                     <div>
+                        <div class="flex items-center gap-4">
+                            <h1 class="text-4xl font-bold text-white">User Guide</h1>
+                             <div class="flex items-center gap-1">
+                                <button class="nav-btn widescreen-toggle-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Toggle Widescreen">
+                                    <svg class="icon-expand w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4h4 M20 8V4h-4 M4 16v4h4 M20 16v4h-4"></path></svg>
+                                    <svg class="icon-compress w-10 h-10 hidden header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4v4H4 M16 4v4h4 M8 20v-4H4 M16 20v-4h4"></path></svg>
+                                </button>
+                                <button data-target-view="main-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Annotator">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                </button>
+                                <button data-target-view="stats-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Statistics">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <rect x="3" y="11" width="4" height="10" rx="1"/> <rect x="10" y="7" width="4" height="14" rx="1"/> <rect x="17" y="3" width="4" height="18" rx="1"/> </svg>
+                                </button>
+                                <button data-target-view="settings-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Settings">
+                                    <svg class="w-10 h-10 gear-icon header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <g>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        </g>
+                                    </svg>
+                                </button>
+                                <button data-target-view="guide-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Guide">
+                                    <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/> <path d="M12 3v6h6"/> </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Guide Content -->
+            <main class="glass-effect rounded-3xl p-4 fade-in text-white">
+                <!-- Content will be loaded here by script.js -->
+                <div class="text-center p-6">
+                    <div class="loading-spinner mx-auto"></div>
+                    <p class="mt-4">Loading Guide...</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div id="toast-container" class="fixed top-5 right-5 z-[1000] flex flex-col items-end gap-3">
+        <!-- Notifications will be added here by JavaScript -->
+    </div>
+
+    <div id="reasoning-tooltip" role="tooltip" class="z-50"></div>
+
+    <script type="module" src="/static/script.js"></script>
+</body>
+</html>

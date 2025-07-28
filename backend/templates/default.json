@@ -1,0 +1,67 @@
+{
+    "name": "Default",
+    "description": "A generic starter template for document classification. Customize this in the Settings menu.",
+    "fields": [
+        {
+            "label": "Document Type",
+            "id": "document_type",
+            "type": "select",
+            "description": "Select the option that best describes the overall type of this document.",
+            "keywords": [
+                "article",
+                "paper",
+                "blog",
+                "news",
+                "report",
+                "study"
+            ],
+            "options": [
+                "News Article",
+                "Research Paper",
+                "Blog Post",
+                "Technical Report",
+                "Opinion Piece",
+                "Other"
+            ],
+            "ai_summary_field": "reasoning"
+        },
+        {
+            "label": "Contains Code Snippets",
+            "id": "has_code",
+            "type": "boolean",
+            "description": "Check this box if the document text includes any formatted blocks of computer code.",
+            "keywords": [
+                "code",
+                "snippet",
+                "python",
+                "javascript",
+                "java",
+                "function",
+                "class",
+                "import",
+                "const",
+                "let",
+                "var"
+            ],
+            "options": [],
+            "ai_summary_field": "context"
+        },
+        {
+            "label": "Contains Data/Tables",
+            "id": "has_data",
+            "type": "boolean",
+            "description": "Check this box if the document includes any tables, charts, or explicit data sets.",
+            "keywords": [
+                "table",
+                "figure",
+                "chart",
+                "graph",
+                "data",
+                "statistics",
+                "results"
+            ],
+            "options": [],
+            "ai_summary_field": "context"
+        }
+    ]
+}

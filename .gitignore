@@ -1,0 +1,19 @@
+venv/
+.venv/
+venv
+.venv
+.DS_Store
+backend/__pycache__
+backend/data/*
+!backend/data/test_files.jsonl
+backend/pdfs/
+# Google Cloud credentials
+backend/credentials.json
+backend/templates/*
+!backend/templates/default.json
+
+# Python virtual environment
+backend/venv/
+
+.env
+
