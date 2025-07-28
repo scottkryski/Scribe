@@ -340,14 +340,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function fetchAndDisplayNextPaper() {
+  async function fetchAndDisplayNextPaper(retryCount = 0) {
     if (!state.currentDataset) return;
 
     stopLockTimer();
-    ui.showLoading(
-      "Finding & Loading Paper",
-      "Please wait while we fetch the data and PDF..."
-    );
+    // Only show the full loading overlay on the first attempt
+    if (retryCount === 0) {
+      ui.showLoading(
+        "Finding & Loading Paper",
+        "Please wait while we fetch the data and PDF..."
+      );
+    }
 
     try {
       state.currentPaper = await api.fetchNextPaper(state.currentDataset);
@@ -381,17 +384,32 @@ document.addEventListener("DOMContentLoaded", () => {
         state.originalFullTextHTML,
         state.activeTemplate
       );
+      // Hide loading on success
+      ui.hideLoading();
     } catch (error) {
+      // If the paper was locked by someone else, and we haven't retried too many times...
+      if (error.message.includes("locked by another user") && retryCount < 5) {
+        console.warn(
+          `Attempt ${retryCount + 1}: Paper was locked, retrying...`
+        );
+        ui.showToastNotification(
+          "That paper was just taken. Finding another...",
+          "info"
+        );
+        // Automatically try to get the next paper again after a short delay.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        return fetchAndDisplayNextPaper(retryCount + 1);
+      }
+
+      // For any other error, or if we've retried too many times, show the final alert.
+      ui.hideLoading();
       alert(error.message);
-      // If an error occurs, hide the panels and show a prompt
       dom.paperView.classList.remove("hidden");
       dom.paperTitle.textContent =
         "Error loading paper. Please try again or skip.";
       dom.paperContentContainer.classList.add("hidden");
       dom.annotationView.classList.add("hidden");
       resizeHandle.style.display = "none";
-    } finally {
-      ui.hideLoading();
     }
   }
 

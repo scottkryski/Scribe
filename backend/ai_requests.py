@@ -193,9 +193,9 @@ async def get_gemini_response(gemini_model: str, pdf_filepath: Path, template: D
 
 if __name__ == "__main__":
     # --- Configuration for Testing ---
-    TEST_OPTION = 1 # or 2
+    TEST_OPTION = 2 # or 2
 
-    if TEST_OPTION == 2:
+    if TEST_OPTION == 1:
         configure_genai()
 
         try:
@@ -236,5 +236,5 @@ if __name__ == "__main__":
         print("\n--- Test Complete ---")
 
     elif TEST_OPTION == 2:
-        models = asyncio.run(get_ollama_models())
+        models = get_ollama_models()
         print(f"Models: {models}")
