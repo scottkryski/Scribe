@@ -35,7 +35,7 @@ Follow these steps to get Scribe running on your local machine.
 Open a terminal or command prompt and clone the repository to your local machine:
 
 ```bash
-git clone https://github.com/scottiekryski/Scribe.git
+git clone https://github.com/scottkryski/Scribe.git
 cd Scribe
 ```
 
