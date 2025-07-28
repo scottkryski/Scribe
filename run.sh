@@ -1,65 +1,114 @@
 #!/bin/bash
-# This script sets up and runs the Annotator application and opens it in a browser.
+# This script checks for updates, then intelligently installs packages and runs Scribe.
 
-# Function to clean up the background server process when the script exits
+# --- Function Definitions ---
+
+# This function smartly installs/updates packages only if requirements.txt has changed.
+install_requirements() {
+    # Define the path for the hash file inside the venv directory
+    local hash_file="$(dirname "$0")/backend/venv/reqs.hash"
+    
+    # Activate the virtual environment
+    source "$(dirname "$0")/backend/venv/bin/activate"
+
+    # Calculate the current hash of the requirements file
+    # Tries shasum (macOS) first, then md5sum (Linux)
+    if command -v shasum &> /dev/null; then
+        local current_hash=$(shasum -a 256 "$(dirname "$0")/requirements.txt" | awk '{print $1}')
+    else
+        local current_hash=$(md5sum "$(dirname "$0")/requirements.txt" | awk '{print $1}')
+    fi
+    
+    # Read the stored hash, if it exists
+    local stored_hash=""
+    if [ -f "$hash_file" ]; then
+        stored_hash=$(cat "$hash_file")
+    fi
+
+    # Compare hashes. If they don't match, run pip install quietly.
+    if [ "$current_hash" != "$stored_hash" ]; then
+        echo "New or updated packages found. Installing..."
+        pip install -q -r "$(dirname "$0")/requirements.txt"
+        # On success, update the hash file with the new hash
+        echo "$current_hash" > "$hash_file"
+        echo "Packages are up to date."
+    fi
+}
+
+# This function cleans up the background server process when the script exits
 cleanup() {
     echo ""
     echo "Shutting down the server..."
-    # Kills the background process whose PID we saved
-    kill $SERVER_PID
+    if [ ! -z "$SERVER_PID" ]; then
+      kill $SERVER_PID
+    fi
     exit
 }
 
-# Trap the INT signal (Ctrl+C) and call the cleanup function
+
+# --- Main Script Logic ---
+
+# Check for git and offer to update if available
+if command -v git &> /dev/null && git fetch &> /dev/null; then
+    LOCAL=$(git rev-parse HEAD)
+    REMOTE=$(git rev-parse @{u})
+
+    if [ "$LOCAL" != "$REMOTE" ]; then
+        echo -e "\nA NEW VERSION OF SCRIBE IS AVAILABLE."
+        echo "-----------------------------------------------------"
+        echo "Recent Changes:"
+        git log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit HEAD..@{u}
+        echo -e "\n-----------------------------------------------------"
+        
+        read -p "Do you want to update now? (y/n): " choice
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            echo "--- Starting Update ---"
+            git pull
+            # After pulling, call our smart installer. It will detect changes.
+            install_requirements
+            echo "--- Update Complete! Restarting... ---"
+            sleep 2
+            exec "$0" "$@" # Restart the script
+            exit
+        else
+            echo "Skipping update. Starting current version."
+        fi
+    fi
+fi
+
+
+# --- Application Startup ---
+
+# Trap Ctrl+C to run our cleanup function
 trap cleanup INT
 
-# Exit immediately if a command exits with a non-zero status.
+# Exit immediately if a command fails
 set -e
 
-# Change to the backend directory, located in the same directory as this script.
+# Change to the backend directory
 cd "$(dirname "$0")/backend"
 
-# Check if the virtual environment directory exists
+# Create venv if it doesn't exist
 if [ ! -d "venv" ]; then
     echo "Python virtual environment not found. Creating one..."
     python3 -m venv venv
 fi
 
-# Activate the virtual environment
-source venv/bin/activate
-
-echo "Installing/checking required packages..."
-pip install -r ../requirements.txt
+# Call our smart installer. It will be fast and silent if no changes are needed.
+install_requirements
 
 echo "-----------------------------------------------------"
-echo "Starting the Annotator server..."
+echo "Starting the Scribe server..."
 echo "-----------------------------------------------------"
 
-# Run the FastAPI application in the background using '&'
 uvicorn main:app --host 127.0.0.1 --port 8000 &
-
-# Save the Process ID (PID) of the server so we can stop it later
 SERVER_PID=$!
-
-# Wait a few seconds for the server to initialize
 sleep 3
 
 URL="http://127.0.0.1:8000"
 echo "Opening application at $URL"
 
-# Use the correct command to open a URL based on the Operating System
-if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    xdg-open "$URL"
-elif [[ "$OSTYPE" == "darwin"* ]]; then # macOS
-    open "$URL"
-else
-    echo "Could not detect OS to open browser automatically. Please navigate to the URL above."
-fi
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then xdg-open "$URL"; elif [[ "$OSTYPE" == "darwin"* ]]; then open "$URL"; fi
 
-echo ""
-echo "Server is running. Press Ctrl+C in this window to stop it."
-
-# 'wait' will pause the script here until the background server process is stopped.
-# When you press Ctrl+C, the 'trap' will run cleanup, which kills the server,
-# and then the 'wait' will complete, allowing the script to exit.
+echo -e "\nServer is running. Press Ctrl+C in this window to stop it."
 wait $SERVER_PID
