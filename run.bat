@@ -1,15 +1,17 @@
 @echo off
+SETLOCAL EnableDelayedExpansion
 REM This script checks for updates, then intelligently installs packages and runs Scribe.
 
 REM --- Update Check Logic ---
 where git >nul 2>nul
 if %errorlevel% == 0 (
+    echo --- Checking for updates ---
     git fetch >nul 2>nul
     if %errorlevel% == 0 (
         for /f "delims=" %%i in ('git rev-parse HEAD') do set "LOCAL=%%i"
         for /f "delims=" %%i in ('git rev-parse @{u}') do set "REMOTE=%%i"
         
-        if not "%LOCAL%" == "%REMOTE%" (
+        if not "!LOCAL!" == "!REMOTE!" (
             echo.
             echo A NEW VERSION OF SCRIBE IS AVAILABLE.
             echo -----------------------------------------------------
@@ -19,7 +21,7 @@ if %errorlevel% == 0 (
             echo -----------------------------------------------------
             
             set /p choice="Do you want to update now? (y/n): "
-            if /i "%choice%"=="y" (
+            if /i "!choice!"=="y" (
                 echo --- Starting Update ---
                 git pull
                 REM After pulling, we will let the main startup logic handle the smart install
@@ -30,8 +32,14 @@ if %errorlevel% == 0 (
             ) else (
                 echo Skipping update. Starting current version...
             )
+        ) else (
+            echo Scribe is up to date.
         )
+    ) else (
+        echo Could not connect to GitHub. Skipping update check.
     )
+) else (
+    echo Git not found. Skipping update check.
 )
 
 :start_server
@@ -71,7 +79,7 @@ if exist "%HASH_FILE%" (
 )
 
 REM Compare hashes. If different, run pip install quietly.
-if not "%CURRENT_HASH%" == "%STORED_HASH%" (
+if not "!CURRENT_HASH!" == "!STORED_HASH!" (
     echo New or updated packages found. Installing...
     pip install -q -r "%REQS_FILE%"
     if %errorlevel% neq 0 (
