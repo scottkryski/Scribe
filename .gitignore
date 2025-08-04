@@ -15,5 +15,6 @@ backend/templates/*
 # Python virtual environment
 backend/venv/
 
+Tests/
 .env
 

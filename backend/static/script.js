@@ -37,6 +37,7 @@ document.addEventListener("DOMContentLoaded", () => {
     "update-notification-banner"
   );
   const updateNowBannerBtn = document.getElementById("update-now-banner-btn");
+  const manualPdfUploadInput = document.getElementById("manual-pdf-upload");
 
   // Update Functions
   async function runStartupUpdateCheck() {
@@ -1186,6 +1187,59 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  async function handleManualPdfUpload(event) {
+    const fileInput = event.target;
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    // Get the expected filename that was stored on the input element
+    const expectedFilename = fileInput.dataset.expectedFilename;
+
+    // The confirmation dialog has been removed.
+    if (!expectedFilename) {
+      alert("Error: Could not determine the expected filename for the upload.");
+      return;
+    }
+
+    try {
+      ui.showLoading("Uploading & Renaming PDF", "Please wait...");
+      // Call the updated API function with both the file and the desired name
+      const result = await api.uploadPdf(file, expectedFilename);
+
+      ui.showToastNotification(
+        `PDF uploaded as "${result.filename}"!`,
+        "success"
+      );
+
+      // Reload the PDF viewer with the newly uploaded and correctly named file
+      dom.pdfViewerContainer.innerHTML = `<h3 class="text-lg font-semibold text-white mb-4">PDF Viewer</h3><iframe class="pdf-iframe" src="${result.url}#view=FitH" type="application/pdf"></iframe>`;
+
+      // Update the application's state with the correct, new filename
+      if (state.currentPaper) {
+        state.currentPaper.pdf_filename = result.filename;
+      }
+    } catch (error) {
+      alert(`Failed to upload PDF: ${error.message}`);
+    } finally {
+      ui.hideLoading();
+      fileInput.value = ""; // Reset the file input
+    }
+  }
+
+  function setupManualUploadListener() {
+    // Use event delegation on a static parent.
+    dom.pdfViewerContainer.addEventListener("click", (event) => {
+      if (event.target.id === "manual-upload-trigger") {
+        const uploader = document.getElementById("manual-pdf-upload");
+        uploader.dataset.expectedFilename =
+          event.target.dataset.expectedFilename;
+        uploader.click();
+      }
+    });
+  }
+
+  // scripts/script.js
+
   async function init() {
     // Setup for main annotation view
     setupPanelResizing();
@@ -1215,12 +1269,34 @@ document.addEventListener("DOMContentLoaded", () => {
     // Setup for SPA navigation
     setupViewSwitching();
 
-    // Add event listeners for main page controls
+    // Add event listeners for main page controls (static elements)
     dom.sheetSelector.addEventListener("change", handleSheetChange);
     dom.datasetSelector.addEventListener("change", handleDatasetChange);
     dom.submitBtn.addEventListener("click", submitAnnotation);
     dom.skipBtn.addEventListener("click", handleSkip);
     dom.getSuggestionsBtn.addEventListener("click", handleGetSuggestions);
+
+    // --- DELEGATED EVENT LISTENERS FOR DYNAMIC CONTENT ---
+    // This is the main change. We listen on `document.body` which always exists.
+    document.body.addEventListener("click", (event) => {
+      // This part handles clicking the "Upload Manually" button.
+      if (event.target.id === "manual-upload-trigger") {
+        const uploader = document.getElementById("manual-pdf-upload");
+        if (uploader) {
+          // Pass the expected filename from the button to the input
+          uploader.dataset.expectedFilename =
+            event.target.dataset.expectedFilename;
+          uploader.click(); // Programmatically click the hidden file input
+        }
+      }
+    });
+
+    document.body.addEventListener("change", (event) => {
+      // This part handles what happens after you've selected a file.
+      if (event.target.id === "manual-pdf-upload") {
+        handleManualPdfUpload(event);
+      }
+    });
 
     // Widescreen toggle resets/applies the correct layout
     document.querySelectorAll(".widescreen-toggle-btn").forEach((btn) => {

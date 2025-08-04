@@ -105,6 +105,7 @@
                         </div>
                         <div id="pdf-viewer-container" class="bg-white bg-opacity-10 rounded-lg p-6 mb-6 hidden" style="margin-top: 24px;">
                             <h3 class="text-lg font-semibold text-white mb-4">PDF Viewer</h3>
+                            <input type="file" id="manual-pdf-upload" class="hidden" accept=".pdf" />
                         </div>
                         <div id="full-text-container" class="bg-white bg-opacity-10 rounded-lg p-6 hidden">
                             <h3 class="text-lg font-semibold text-white mb-4">Full Text</h3>
@@ -119,16 +120,17 @@
 
                 <!-- Annotation Panel -->
                 <div id="annotation-view" class="glass-effect rounded-3xl p-6 fade-in flex flex-col sticky-annotation hidden">
-                    <form id="annotation-form" class="flex flex-col h-full">
-                        
-                        <div class="text-2xl font-bold text-white mb-4">Annotation Info</div>
-                        
-                        <div class="glass-effect rounded-2xl p-4 mb-4 space-y-3">
-                            <div class="flex flex-col">
-                                <label for="paper-doi" class="text-white font-medium text-sm mb-1">DOI:</label>
-                                <input type="text" id="paper-doi" name="paper-doi" class="w-full p-2 bg-white bg-opacity-10 rounded-lg text-gray-300 text-sm" readonly tabindex="-1">
-                            </div>
+                    
+                    <div class="text-2xl font-bold text-white mb-4">Annotation Info</div>
+                    
+                    <div class="glass-effect rounded-2xl p-4 mb-4 space-y-3">
+                        <div class="flex flex-col">
+                            <label for="paper-doi" class="text-white font-medium text-sm mb-1">DOI:</label>
+                            <input type="text" id="paper-doi" name="paper-doi" class="w-full p-2 bg-white bg-opacity-10 rounded-lg text-gray-300 text-sm" readonly tabindex="-1">
                         </div>
+                    </div>
+                    
+                    <form id="annotation-form" class="flex flex-col h-full">
                         <div id="ai-suggestion-panel" class="glass-effect rounded-2xl p-4 mb-4">
                             <button id="get-suggestions-btn" type="button" class="w-full glass-hover bg-gradient-to-r from-purple-500 to-indigo-600 text-white py-2 px-4 rounded-lg font-semibold">
                                 Get AI Suggestions

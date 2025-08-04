@@ -166,11 +166,44 @@ export async function downloadPdf(pdfData) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(pdfData),
   });
-  if (!response.ok) throw new Error((await response.json()).detail);
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    const author = (pdfData.author || "UnknownAuthor").replace(/[^\w-]/g, "");
+    const year = pdfData.year || "UnknownYear";
+    const safeTitle = (pdfData.title || "untitled_paper")
+      .replace(/[^\w\s-]/g, "")
+      .trim()
+      .toLowerCase();
+    const titleFragment = safeTitle.split(/\s+/).slice(0, 4).join("_");
+    const filename = `${author}${year}-${titleFragment}.pdf`;
+
+    errorData.expected_filename = filename;
+    errorData.attempted_url = pdfData.url; // Pass the URL for better error reporting
+    throw errorData;
+  }
 
   const filename = response.headers.get("X-Saved-Filename");
   const blob = await response.blob();
   return { blob, filename };
+}
+
+export async function uploadPdf(file, expectedFilename) {
+  const formData = new FormData();
+  formData.append("file", file);
+  // Add the expected filename to the form data to be sent to the backend
+  formData.append("expected_filename", expectedFilename);
+
+  const response = await fetch(`${API_BASE_URL}/upload-pdf`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || "Failed to upload PDF.");
+  }
+  return response.json();
 }
 
 export async function openDataFolder() {

@@ -233,7 +233,28 @@ async function loadPdf(paper) {
   } catch (error) {
     console.error("PDF Load Error:", error);
     paper.pdf_filename = null;
-    dom.pdfViewerContainer.innerHTML += `<div class="mt-2 p-4 bg-red-900 bg-opacity-50 rounded-lg"><p class="font-bold text-red-300">Could not load PDF</p><p class="text-red-400 text-sm mt-1">Reason: ${error.message}</p></div>`;
+    const expectedFilename =
+      error.expected_filename || "Could not determine filename.";
+    const attemptedUrl = error.attempted_url || url;
+
+    dom.pdfViewerContainer.innerHTML = `
+        <h3 class="text-lg font-semibold text-white mb-4">PDF Viewer</h3>
+        <div class="mt-2 p-4 bg-red-900 bg-opacity-50 rounded-lg">
+            <p class="font-bold text-red-300">Could not automatically load PDF</p>
+            <p class="text-red-400 text-sm mt-1">Reason: ${
+              error.detail || error.message
+            }</p>
+            <p class="text-gray-300 text-sm mt-3">
+                You may need to download the PDF manually from
+                <a href="${attemptedUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-400 underline">this link</a>
+                and then upload it below.
+            </p>
+            <p class="text-yellow-300 text-sm mt-3">Expected filename:</p>
+            <code class="text-xs text-yellow-200 bg-black/20 p-1 rounded">${expectedFilename}</code>
+            <button id="manual-upload-trigger" data-expected-filename="${expectedFilename}" class="btn-primary mt-4 w-full">Upload Manually</button>
+        </div>
+        <input type="file" id="manual-pdf-upload" class="hidden" accept=".pdf" />
+        `;
   }
 }
 
