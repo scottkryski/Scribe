@@ -69,7 +69,7 @@ The AI features are powered by a Gemini API Key. This is optional if you only wi
 Platform-specific scripts are included to set up a virtual environment, install packages, and run the server.
 
 - **On Windows:** Double-click `run.bat`.
-- **On macOS/Linux:** Open a terminal and run `./run.sh`.
+- **On macOS/Linux:** Open a terminal and run `./run.sh`. On MacOS you can also double click run.command.
 
 The script will start the server and automatically open the application in your web browser at **[http://127.0.0.1:8000](http://127.0.0.1:8000)**. The server will continue running in the terminal window, even if you close the broswer.
 
