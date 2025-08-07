@@ -69,6 +69,11 @@ LOCK_TIMEOUT_SECONDS = 7200  # 2 hours
 DATA_DIR = Path("data")
 PDF_DIR = Path("pdfs")
 TEMPLATES_DIR = Path("templates")
+
+# Make sure the directories exist
+for dir in [DATA_DIR, PDF_DIR, TEMPLATES_DIR]:
+    if not dir.exists():
+        dir.mkdir(parents=True, exist_ok=True)
 SHEETS_CONFIG_FILE = DATA_DIR / "sheets_config.json"
 # Bundled resources that PyInstaller will include with the app. Disabled for now
 STATIC_DIR = resource_path("static")
