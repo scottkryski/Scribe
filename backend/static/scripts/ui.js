@@ -2,6 +2,25 @@
 import * as dom from "./domElements.js";
 import * as api from "./api.js";
 
+let autoFillNotifyTimer = null;
+
+export function showDebouncedAutoFillNotification() {
+  // Clear any existing timer to reset the waiting period
+  if (autoFillNotifyTimer) {
+    clearTimeout(autoFillNotifyTimer);
+  }
+
+  // Set a new timer. If this function is called again quickly, the old timer
+  // will be cleared and a new one will be set.
+  autoFillNotifyTimer = setTimeout(() => {
+    showToastNotification(
+      "Fields were automatically updated based on your selection.",
+      "autofill"
+    );
+    autoFillNotifyTimer = null; // Reset after the notification is shown
+  }, 300); // Wait 300ms after the last change to show the notification
+}
+
 // --- Notifications & Loaders ---
 
 export function showLoading(title, text) {
@@ -32,7 +51,7 @@ export function setButtonLoading(button, isLoading, text = "") {
   }
 }
 
-export function showToastNotification(message, type = "info") {
+export function showToastNotification(message, type = "info", duration = 5000) {
   const container = document.getElementById("toast-container");
   if (!container) return;
 
@@ -43,6 +62,7 @@ export function showToastNotification(message, type = "info") {
     error: "bg-red-600/80 border-red-700",
     warning: "bg-yellow-500/80 border-yellow-600",
     info: "bg-blue-600/80 border-blue-700",
+    autofill: "bg-indigo-600/80 border-indigo-700",
   };
 
   notification.className = `toast-notification fade-in ${
@@ -55,7 +75,12 @@ export function showToastNotification(message, type = "info") {
   setTimeout(() => {
     notification.classList.replace("fade-in", "fade-out");
     notification.addEventListener("animationend", () => notification.remove());
-  }, 5000);
+  }, duration);
+}
+
+export function showAutoFillNotification(message, type = "autofill") {
+  // Use a specific type and a longer duration for auto-fill messages
+  showToastNotification(message, type, 7000);
 }
 
 function showIncompleteAnnotationNotification() {
@@ -95,13 +120,28 @@ function applyExistingAnnotation(annotationData) {
     const element = document.getElementById(key);
 
     if (element) {
-      if (element.type === "checkbox") {
-        element.checked =
-          String(value).trim().toLowerCase() === "true" || value === true;
+      // Handle our new boolean button group
+      if (
+        element.type === "hidden" &&
+        element.parentElement.classList.contains("boolean-button-group")
+      ) {
+        const valueStr =
+          String(value).toLowerCase() === "true"
+            ? "true"
+            : String(value).toLowerCase() === "false"
+            ? "false"
+            : "";
+        if (valueStr) {
+          const btn = element.parentElement.querySelector(
+            `.boolean-btn[data-value="${valueStr}"]`
+          );
+          if (btn) btn.click();
+        }
       } else {
+        // Handle standard select elements
         element.value = value;
       }
-      element.dispatchEvent(new Event("change"));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
     const contextTextarea = document.querySelector(`[name="${key}_context"]`);
@@ -125,32 +165,38 @@ export function applyGeminiSuggestions(suggestions, activeTemplate) {
     if (!element) continue;
 
     const fieldDef = activeTemplate.fields.find((f) => f.id === key);
-
     const value = suggestions[key];
     const context = suggestions[`${key}_context`];
     const reasoning = suggestions[`${key}_reasoning`];
 
-    if (element.type === "checkbox") {
-      element.checked = value;
+    // Handle our new boolean button group
+    if (
+      element.type === "hidden" &&
+      element.parentElement.classList.contains("boolean-button-group")
+    ) {
+      const valueStr = value.toString();
+      if (element.value !== valueStr) {
+        const btn = element.parentElement.querySelector(
+          `.boolean-btn[data-value="${valueStr}"]`
+        );
+        if (btn) btn.click();
+      }
     } else {
+      // Handle standard select elements
       element.value = value;
     }
-    element.dispatchEvent(new Event("change"));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
 
     if (element.dataset.contextTarget) {
       const contextTextarea = document.querySelector(
         `[name="${element.dataset.contextTarget}"]`
       );
       if (contextTextarea) {
-        // This block implements the fallback behavior.
         const summaryFieldType = fieldDef?.ai_summary_field || "context";
         let textToApply = "";
-
         if (summaryFieldType === "reasoning") {
-          // If the user explicitly wants reasoning, use it.
           textToApply = reasoning || "";
         } else {
-          // Default to 'context' but fall back to 'reasoning' if context is empty.
           textToApply = context || reasoning || "";
         }
         contextTextarea.value = textToApply;
@@ -169,11 +215,38 @@ export function applyGeminiSuggestions(suggestions, activeTemplate) {
 
 export function resetForm() {
   if (dom.annotationForm) {
+    // Reset standard form elements like selects
     dom.annotationForm.reset();
+    dom.annotationForm.querySelectorAll("select").forEach((el) => {
+      el.dispatchEvent(new Event("change"));
+    });
+
+    // Manually reset the new boolean button groups
     dom.annotationForm
-      .querySelectorAll('input[type="checkbox"], select')
+      .querySelectorAll(".boolean-button-group")
+      .forEach((group) => {
+        group
+          .querySelectorAll(".boolean-btn")
+          .forEach((btn) => btn.classList.remove("active"));
+        const hiddenInput = group.querySelector('input[type="hidden"]');
+        if (hiddenInput) {
+          hiddenInput.value = "";
+          hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+
+    // Manually reset all locks
+    dom.annotationForm
+      .querySelectorAll("[data-locked='true']")
       .forEach((el) => {
-        el.dispatchEvent(new Event("change"));
+        delete el.dataset.locked;
+      });
+    dom.annotationForm
+      .querySelectorAll(".autofill-lock-btn.active")
+      .forEach((btn) => {
+        btn.classList.remove("active");
+        btn.querySelector(".icon-unlocked").classList.remove("hidden");
+        btn.querySelector(".icon-locked").classList.add("hidden");
       });
   }
   document
@@ -191,10 +264,8 @@ export function setupContextToggles() {
       const targetId = event.target.dataset.contextTarget;
       const contextBox = document.getElementById(targetId);
       if (contextBox) {
-        let shouldShow =
-          event.target.type === "checkbox"
-            ? event.target.checked
-            : !!event.target.value;
+        // Show if the value is 'true' for booleans, or any non-empty value for selects
+        let shouldShow = event.target.value === "true";
         contextBox.classList.toggle("hidden", !shouldShow);
       }
     });
@@ -286,12 +357,13 @@ export async function renderPaper(paper) {
   dom.pdfViewerContainer.classList.remove("hidden");
   await loadPdf(paper);
 
+  // Reset the form first to clear any previous state
+  resetForm();
+
   if (paper.existing_annotation) {
     applyExistingAnnotation(paper.existing_annotation);
     showIncompleteAnnotationNotification();
     highlightMissingFields(paper.existing_annotation);
-  } else {
-    resetForm();
   }
 
   return {
