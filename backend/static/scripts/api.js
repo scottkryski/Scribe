@@ -109,22 +109,55 @@ export async function loadDataset(datasetName) {
   return response.json();
 }
 
-export async function fetchNextPaper(datasetName) {
+export async function fetchNextPaper(datasetName, skipDoi = null) {
   const pdfRequired =
     localStorage.getItem("loadPdfOnly") === null
       ? "true"
       : localStorage.getItem("loadPdfOnly");
   const annotatorName = localStorage.getItem("annotatorName") || "unknown";
 
-  const response = await fetch(
-    `${API_BASE_URL}/get-next-paper?dataset=${datasetName}&annotator=${annotatorName}&pdf_required=${pdfRequired}`
-  );
+  let url = `${API_BASE_URL}/get-next-paper?dataset=${datasetName}&annotator=${annotatorName}&pdf_required=${pdfRequired}`;
+  if (skipDoi) {
+    url += `&skip_doi=${encodeURIComponent(skipDoi)}`;
+  }
+
+  const response = await fetch(url);
 
   if (!response.ok) {
     const errorData = await response.json();
     throw new Error(errorData.detail || "Failed to fetch the next paper.");
   }
   return response.json();
+}
+
+export async function fetchPaperByDoi(doi, dataset) {
+  const response = await fetch(
+    `${API_BASE_URL}/get-paper-by-doi?doi=${encodeURIComponent(
+      doi
+    )}&dataset=${dataset}`
+  );
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(
+      errorData.detail || `Failed to fetch paper with DOI ${doi}.`
+    );
+  }
+  return response.json();
+}
+
+export async function checkForResumablePaper(annotatorName) {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/check-for-resumable-paper?annotator=${encodeURIComponent(
+        annotatorName
+      )}`
+    );
+    if (!response.ok) return { resumable: false };
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to check for resumable paper:", error);
+    return { resumable: false };
+  }
 }
 
 export async function getLockStatus(doi) {

@@ -361,7 +361,6 @@ document.addEventListener("DOMContentLoaded", () => {
   async function handleDatasetChange() {
     const selectedDataset = dom.datasetSelector.value;
     if (!selectedDataset || !state.currentSheetId) {
-      // Don't proceed if no dataset or sheet is selected
       return;
     }
     state.currentDataset = selectedDataset;
@@ -370,12 +369,46 @@ document.addEventListener("DOMContentLoaded", () => {
       selectedDataset
     );
 
-    ui.showLoading("Loading Dataset", "Filtering against sheet records...");
+    ui.showLoading("Loading Session", "Checking for resumable papers...");
+
     try {
+      // Step 1: ALWAYS check for a resumable paper first.
+      const annotatorName = localStorage.getItem("annotatorName");
+      let doiToSkip = null;
+
+      if (annotatorName) {
+        const resumable = await api.checkForResumablePaper(annotatorName);
+        if (resumable && resumable.resumable) {
+          const resume = confirm(
+            `You were previously working on the paper:\n\n"${resumable.title}"\n\nWould you like to resume?`
+          );
+          if (resume) {
+            // User wants to resume. Load the dataset first, then fetch the specific paper.
+            // This ensures the queue is ready for when they finish the resumed paper.
+            ui.showLoading("Loading Dataset", "Please wait...");
+            await api.loadDataset(state.currentDataset);
+            await fetchAndDisplaySpecificPaper(resumable.doi);
+            return; // EXIT here, we are done.
+          } else {
+            // User declined. Release the lock and mark this DOI to be skipped for the *next* fetch.
+            ui.showToastNotification(
+              "Lock released. Finding a new paper...",
+              "info"
+            );
+            await api.skipPaper(state.currentDataset, resumable.doi);
+            doiToSkip = resumable.doi; // IMPORTANT: Remember which one to skip.
+          }
+        }
+      }
+
+      // Step 2: Load the dataset. This populates the queue.
+      ui.showLoading("Loading Dataset", "Filtering against sheet records...");
       const result = await api.loadDataset(state.currentDataset);
       state.totalPapersInQueue = result.queued_count;
       state.annotatedInSession = 0;
-      await fetchAndDisplayNextPaper();
+
+      // Step 3: Fetch the next paper, passing the DOI to skip if the user declined resumption.
+      await fetchAndDisplayNextPaper(0, doiToSkip);
     } catch (error) {
       ui.hideLoading();
       alert(`Error loading dataset: ${error.message}`);
@@ -503,7 +536,64 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function fetchAndDisplayNextPaper(retryCount = 0) {
+  async function fetchAndDisplaySpecificPaper(doi) {
+    if (!state.currentDataset) return;
+    stopLockTimer();
+    ui.showLoading(
+      "Resuming Session",
+      "Please wait while we fetch your previous paper..."
+    );
+
+    try {
+      state.currentPaper = await api.fetchPaperByDoi(doi, state.currentDataset);
+      await displayPaper(state.currentPaper);
+    } catch (error) {
+      ui.hideLoading();
+      alert(
+        `Error resuming paper: ${error.message}. Getting a new paper instead.`
+      );
+      await fetchAndDisplayNextPaper();
+    }
+  }
+
+  async function displayPaper(paper) {
+    state.currentPaper = paper;
+
+    // Make the main panels visible now that we have data
+    dom.paperView.classList.remove("hidden");
+    dom.annotationView.classList.remove("hidden");
+    dom.paperContentContainer.classList.remove("hidden");
+
+    if (window.innerWidth >= 1024) {
+      resizeHandle.style.display = "flex";
+    } else {
+      resizeHandle.style.display = "none";
+    }
+
+    const { originalAbstractHTML, originalFullTextHTML } = await ui.renderPaper(
+      state.currentPaper
+    );
+
+    // --- Pass the initial lock info from the API response ---
+    startLockTimer(state.currentPaper.lock_info);
+
+    state.originalAbstractHTML = originalAbstractHTML;
+    state.originalFullTextHTML = originalFullTextHTML;
+    state.activeHighlightIds.clear();
+    document
+      .querySelectorAll(".highlight-toggle-btn")
+      .forEach((btn) => btn.classList.remove("active"));
+    highlighting.updateAllHighlights(
+      state.activeHighlightIds,
+      state.originalAbstractHTML,
+      state.originalFullTextHTML,
+      state.activeTemplate
+    );
+    // Hide loading on success
+    ui.hideLoading();
+  }
+
+  async function fetchAndDisplayNextPaper(retryCount = 0, skipDoi = null) {
     if (!state.currentDataset) return;
 
     stopLockTimer();
@@ -516,39 +606,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     try {
-      state.currentPaper = await api.fetchNextPaper(state.currentDataset);
-
-      // Make the main panels visible now that we have data
-      dom.paperView.classList.remove("hidden");
-      dom.annotationView.classList.remove("hidden");
-      dom.paperContentContainer.classList.remove("hidden");
-
-      if (window.innerWidth >= 1024) {
-        resizeHandle.style.display = "flex";
-      } else {
-        resizeHandle.style.display = "none";
-      }
-
-      const { originalAbstractHTML, originalFullTextHTML } =
-        await ui.renderPaper(state.currentPaper);
-
-      // --- Pass the initial lock info from the API response ---
-      startLockTimer(state.currentPaper.lock_info);
-
-      state.originalAbstractHTML = originalAbstractHTML;
-      state.originalFullTextHTML = originalFullTextHTML;
-      state.activeHighlightIds.clear();
-      document
-        .querySelectorAll(".highlight-toggle-btn")
-        .forEach((btn) => btn.classList.remove("active"));
-      highlighting.updateAllHighlights(
-        state.activeHighlightIds,
-        state.originalAbstractHTML,
-        state.originalFullTextHTML,
-        state.activeTemplate
-      );
-      // Hide loading on success
-      ui.hideLoading();
+      const paper = await api.fetchNextPaper(state.currentDataset, skipDoi);
+      await displayPaper(paper);
     } catch (error) {
       // If the paper was locked by someone else, and we haven't retried too many times...
       if (error.message.includes("locked by another user") && retryCount < 5) {
@@ -561,7 +620,7 @@ document.addEventListener("DOMContentLoaded", () => {
         );
         // Automatically try to get the next paper again after a short delay.
         await new Promise((resolve) => setTimeout(resolve, 500));
-        return fetchAndDisplayNextPaper(retryCount + 1);
+        return fetchAndDisplayNextPaper(retryCount + 1, skipDoi);
       }
 
       // For any other error, or if we've retried too many times, show the final alert.
