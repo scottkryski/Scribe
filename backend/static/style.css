@@ -213,55 +213,80 @@ input::placeholder, textarea::placeholder {
     opacity: 0.7;
 }
 
-.toggle-switch {
-    position: relative;
-    display: inline-block;
-    width: 50px;
-    height: 28px;
+.boolean-button-group {
+    display: flex;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    border: 1px solid var(--glass-border);
+    width: fit-content;
 }
 
-.toggle-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.slider {
-    position: absolute;
+.boolean-btn {
+    background-color: rgba(0,0,0,0.2);
+    border: none;
+    padding: 0.5rem 1rem;
+    color: var(--text-secondary);
     cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(255, 255, 255, 0.2);
-    transition: .4s;
-    border-radius: 28px;
+    transition: all 0.2s ease-in-out;
+    font-weight: 600;
 }
 
-.slider:before {
-    position: absolute;
-    content: "";
-    height: 20px;
-    width: 20px;
-    left: 4px;
-    bottom: 4px;
-    background-color: white;
-    transition: .4s;
-    border-radius: 50%;
+.boolean-btn:first-of-type {
+    border-right: 1px solid var(--glass-border);
 }
 
-input:checked + .slider {
-    background-color: #10b981;
+.boolean-btn:hover {
+    background-color: var(--glass-hover-bg);
+    color: var(--text-primary);
 }
 
-input:checked + .slider:before {
-    transform: translateX(22px);
+.boolean-btn.active {
+    color: #FFFFFF !important;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+}
+
+.boolean-btn[data-value="true"].active {
+    background-color: rgba(16, 185, 129, 0.8); /* Green tint */
+    box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
+}
+
+.boolean-btn[data-value="false"].active {
+    background-color: rgba(239, 68, 68, 0.8); /* Red tint */
+    box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
 }
 
 select option {
     background-color: var(--accent-color-strong);
     color: var(--text-primary);
 }
+
+.autofill-lock-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease-in-out;
+}
+
+.autofill-lock-btn svg {
+    width: 18px;
+    height: 18px;
+    stroke: var(--text-secondary);
+    transition: all 0.2s ease-in-out;
+}
+
+.autofill-lock-btn:hover svg {
+    stroke: var(--text-primary);
+}
+
+.autofill-lock-btn.active svg {
+    stroke: #FBBF24; /* A bright color like yellow to indicate active lock */
+}
+
 
 /* --- Layout & App Specific Styles --- */
 
@@ -528,7 +553,7 @@ a[title="Settings"] .gear-icon {
 .settings-accordion-content {
     max-height: 0;
     transition: max-height 0.5s ease-in-out, margin-top 0.5s ease-in-out, padding-top 0.5s ease-in-out, border-top-width 0.5s ease-in-out;
-    overflow: hidden;
+    overflow: hidden; /* This MUST be hidden for the max-height animation to work correctly */
     margin-top: 0;
     padding-top: 0;
     border-top-width: 0;
@@ -536,9 +561,9 @@ a[title="Settings"] .gear-icon {
 }
 
 .settings-accordion-content.open {
-    max-height: 6000px; /* A very large value to accommodate content */
-    margin-top: 1.5rem; /* Corresponds to mt-6 */
-    padding-top: 1.5rem; /* Corresponds to pt-6 */
+    max-height: 20000px; /* BUG FIX: Increased to a very large value to prevent content cutoff */
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
     border-top-width: 1px;
 }
 
@@ -637,11 +662,6 @@ html.theme-cyberpunk .logo-img {
     filter: drop-shadow(0 0 8px var(--accent-color));
 }
 
-html.theme-cyberpunk .toggle-switch input:checked + .slider {
-    background-color: var(--accent-color);
-}
-
-
 /* --- FOREST THEME --- */
 html.theme-forest .text-white {
     color: var(--text-primary) !important;
@@ -664,10 +684,6 @@ html.theme-forest #get-suggestions-btn {
 
 html.theme-forest .header-icon {
     stroke: var(--text-secondary);
-}
-
-html.theme-forest .toggle-switch input:checked + .slider {
-    background-color: var(--accent-color-strong);
 }
 
 html.theme-forest input,

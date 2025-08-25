@@ -2,7 +2,7 @@ import google.genai as genai
 from google.genai import types
 from ollama import generate, ListResponse, list
 import json
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 import os
 import asyncio
 from pydantic import BaseModel, ValidationError, create_model
@@ -20,8 +20,8 @@ def configure_genai():
     The genai client will automatically pick it up from environment variables.
     """
     global GEMINI_API_KEY, _genai_configured
-    dotenv_path = Path(__file__).parent.parent / '.env'
-    load_dotenv(dotenv_path=dotenv_path, override=True)
+    dotenv_path = find_dotenv()
+    load_dotenv(dotenv_path=dotenv_path if dotenv_path else None, override=True)
     
     key_from_env = os.getenv("GEMINI_API_KEY")
     

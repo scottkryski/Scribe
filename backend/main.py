@@ -522,8 +522,92 @@ def get_datasets():
     print("LOG: Requesting list of available datasets.")
     return sorted(list(AVAILABLE_DATASETS.keys()))
 
+@app.get("/check-for-resumable-paper")
+def check_for_resumable_paper(annotator: str):
+    """
+    Checks if the given annotator has a paper that is still locked by them.
+    This allows the frontend to offer resuming the session.
+    """
+    print(f"LOG: Checking for resumable paper for annotator '{annotator}'")
+    if not worksheet:
+        print("LOG: No sheet connected, cannot check for resumable paper.")
+        return {"resumable": False}
+
+    try:
+        all_values = worksheet.get_all_values()
+        if not all_values:
+            return {"resumable": False}
+        
+        headers = all_values[0]
+        # Ensure all required columns exist
+        if not all(h in headers for h in ['doi', 'title', 'lock_annotator', 'lock_timestamp']):
+            print("WARN-LOG: Sheet is missing one of the required columns for resumption check.")
+            return {"resumable": False}
+
+        doi_idx = headers.index('doi')
+        title_idx = headers.index('title')
+        lock_annotator_idx = headers.index('lock_annotator')
+        lock_timestamp_idx = headers.index('lock_timestamp')
+
+        # Iterate backwards as it's more likely a recent lock
+        for row in reversed(all_values[1:]):
+            # Check for row length to avoid IndexError
+            if len(row) > max(lock_annotator_idx, lock_timestamp_idx, doi_idx, title_idx):
+                lock_holder = row[lock_annotator_idx]
+                lock_time_str = row[lock_timestamp_idx]
+
+                if lock_holder == annotator and lock_time_str:
+                    try:
+                        lock_time = float(lock_time_str)
+                        if time.time() - lock_time < LOCK_TIMEOUT_SECONDS:
+                            print(f"LOG: Found resumable paper for {annotator}. DOI: {row[doi_idx]}")
+                            return {
+                                "resumable": True,
+                                "doi": row[doi_idx],
+                                "title": row[title_idx]
+                            }
+                    except (ValueError, TypeError):
+                        # Ignore rows with invalid timestamp format
+                        continue
+        
+        print(f"LOG: No resumable paper found for {annotator}.")
+        return {"resumable": False}
+    except Exception as e:
+        print(f"ERROR: Could not check for resumable paper due to an error: {e}")
+        # In case of any error, we don't block the user.
+        return {"resumable": False}
+
+@app.get("/get-paper-by-doi")
+def get_paper_by_doi(doi: str, dataset: str):
+    """Fetches a specific paper by its DOI from a given dataset file."""
+    print(f"LOG: Request to fetch paper with DOI '{doi}' from dataset '{dataset}'.")
+    if dataset not in AVAILABLE_DATASETS:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found on server.")
+
+    filepath = AVAILABLE_DATASETS[dataset]
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    paper_data = json.loads(line)
+                    if paper_data.get("doi") == doi:
+                        print(f"LOG: Found paper with DOI '{doi}' in {dataset}.")
+                        # Check and attach lock status before returning
+                        lock_status = get_lock_status(doi)
+                        paper_data['lock_info'] = lock_status
+                        if doi in INCOMPLETE_ANNOTATIONS:
+                             paper_data['existing_annotation'] = INCOMPLETE_ANNOTATIONS[doi]['data']
+                        return paper_data
+                except json.JSONDecodeError:
+                    continue # Ignore corrupted lines
+
+        raise HTTPException(status_code=404, detail=f"Paper with DOI '{doi}' not found in dataset '{dataset}'.")
+    except Exception as e:
+        print(f"ERROR: Failed to read or process dataset file for DOI '{doi}'. Error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve paper data.")
+
 @app.get("/get-next-paper")
-def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True):
+def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip_doi: Optional[str] = None):
     print(f"\n--- LOG: GET_NEXT_PAPER triggered for dataset '{dataset}' by '{annotator}' ---")
     if not worksheet:
         print("ERROR-LOG: No Google Sheet connected.")
@@ -548,6 +632,9 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True):
 
         print("LOG: Building set of unavailable DOIs from sheet...")
         unavailable_dois = set(ANNOTATED_ITEMS)
+        if skip_doi:
+            unavailable_dois.add(skip_doi)
+            print(f"LOG: Temporarily skipping DOI '{skip_doi}' as requested.")
         
         if doi_col_idx != -1:
             for row in all_sheet_values[1:]:

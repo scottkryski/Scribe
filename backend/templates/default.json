@@ -23,7 +23,8 @@
                 "Opinion Piece",
                 "Other"
             ],
-            "ai_summary_field": "reasoning"
+            "ai_summary_field": "reasoning",
+            "autoFillRules": []
         },
         {
             "label": "Contains Code Snippets",
@@ -44,7 +45,8 @@
                 "var"
             ],
             "options": [],
-            "ai_summary_field": "context"
+            "ai_summary_field": "context",
+            "autoFillRules": []
         },
         {
             "label": "Contains Data/Tables",
@@ -61,7 +63,8 @@
                 "results"
             ],
             "options": [],
-            "ai_summary_field": "context"
+            "ai_summary_field": "context",
+            "autoFillRules": []
         }
     ]
 }

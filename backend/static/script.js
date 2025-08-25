@@ -136,6 +136,133 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+  /**
+   * Applies a single automatic fill rule.
+   * @param {object} rule - The rule object containing targetId and targetValue.
+   * @param {string} triggerId - The ID of the element that triggered this rule.
+   */
+  function applyAutoFillRule(rule, triggerId) {
+    const targetEl = document.getElementById(rule.targetId);
+    if (!targetEl) return;
+
+    // If the target field is locked, do nothing and notify the user.
+    if (targetEl.dataset.locked === "true") {
+      // The visual lock icon is sufficient feedback, no notification needed to reduce noise.
+      return;
+    }
+
+    let valueChanged = false;
+
+    // Check if the target is our new boolean button group
+    if (
+      targetEl.type === "hidden" &&
+      targetEl.parentElement.classList.contains("boolean-button-group")
+    ) {
+      const group = targetEl.parentElement;
+      const valueToSet = rule.targetValue.toString();
+      // Only act if the value needs to be changed
+      if (targetEl.value !== valueToSet) {
+        targetEl.value = valueToSet;
+        valueChanged = true;
+        // Update the UI of the buttons to reflect the new value
+        group.querySelectorAll(".boolean-btn").forEach((button) => {
+          button.classList.toggle(
+            "active",
+            button.dataset.value === valueToSet
+          );
+        });
+      }
+    } else if (targetEl.tagName === "SELECT") {
+      // Handle standard select elements
+      if (targetEl.value !== rule.targetValue) {
+        targetEl.value = rule.targetValue;
+        valueChanged = true;
+      }
+    }
+
+    // Only dispatch an event and update metadata if the value was actually changed.
+    // This is the key to preventing infinite loops.
+    if (valueChanged) {
+      ui.showDebouncedAutoFillNotification();
+      // Mark the element as having been auto-filled by this trigger
+      targetEl.dataset.autofilledBy = triggerId;
+
+      // Dispatch a change event so that any downstream listeners run.
+      targetEl.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  /**
+   * Resets a single form field to its unselected state.
+   * @param {HTMLElement} fieldElement - The form element to reset.
+   */
+  function resetField(fieldElement) {
+    if (!fieldElement || fieldElement.dataset.locked === "true") return;
+
+    const originalValue = fieldElement.value;
+
+    // Handle boolean button groups
+    if (
+      fieldElement.type === "hidden" &&
+      fieldElement.parentElement.classList.contains("boolean-button-group")
+    ) {
+      const group = fieldElement.parentElement;
+      group
+        .querySelectorAll(".boolean-btn")
+        .forEach((btn) => btn.classList.remove("active"));
+      fieldElement.value = "";
+    }
+    // Handle select dropdowns
+    else if (fieldElement.tagName === "SELECT") {
+      fieldElement.value = "";
+    }
+
+    // If the value was changed, trigger the notification and update state
+    if (originalValue !== fieldElement.value) {
+      ui.showDebouncedAutoFillNotification();
+      delete fieldElement.dataset.autofilledBy;
+      fieldElement.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  /**
+   * Initializes automatic fill listeners for the current template.
+   * @param {object} template - The active annotation template object.
+   */
+  function initializeAutoFill(template) {
+    if (!template || !template.fields) return;
+
+    template.fields.forEach((field) => {
+      if (!field.autoFillRules || field.autoFillRules.length === 0) return;
+
+      const triggerEl = document.getElementById(field.id);
+      if (!triggerEl) return;
+
+      triggerEl.addEventListener("change", (e) => {
+        const whoSetMe = e.target.dataset.autofilledBy; // Who triggered this change?
+        const triggerId = e.target.id;
+        const currentValue = e.target.value;
+
+        // 1. Reset any fields that were previously set by THIS trigger
+        document
+          .querySelectorAll(`[data-autofilled-by="${triggerId}"]`)
+          .forEach((fieldToReset) => {
+            // FIX: Don't reset the field that just caused this change event. This prevents infinite loops.
+            if (fieldToReset.id === whoSetMe) {
+              return;
+            }
+            resetField(fieldToReset);
+          });
+
+        // 2. Apply new rules based on the new value
+        field.autoFillRules.forEach((rule) => {
+          if (currentValue === rule.triggerValue.toString()) {
+            applyAutoFillRule(rule, triggerId);
+          }
+        });
+      });
+    });
+  }
 
   function buildAnnotationFormFromTemplate(template) {
     if (!template || !template.fields) {
@@ -151,9 +278,20 @@ document.addEventListener("DOMContentLoaded", () => {
       const row = document.createElement("div");
       row.className = "annotation-row glass-effect rounded-xl p-3";
 
+      const lockButtonHTML = `
+            <button type="button" class="autofill-lock-btn" data-target-lock="${field.id}" title="Lock field to prevent auto-fill">
+                <svg class="icon-unlocked" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H4.5a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+                <svg class="icon-locked hidden" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H4.5a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+            </button>`;
+
       let controlHTML = "";
       if (field.type === "boolean") {
-        controlHTML = `<label class="toggle-switch"><input type="checkbox" id="${field.id}" name="${field.id}" data-context-target="${field.id}_context"><span class="slider"></span></label>`;
+        controlHTML = `
+                <div class="boolean-button-group">
+                    <button type="button" class="boolean-btn" data-value="true">TRUE</button>
+                    <button type="button" class="boolean-btn" data-value="false">FALSE</button>
+                    <input type="hidden" id="${field.id}" name="${field.id}" value="" data-context-target="${field.id}_context">
+                </div>`;
       } else if (field.type === "select") {
         const optionsHTML = field.options
           .map((opt) => `<option value="${opt}">${opt}</option>`)
@@ -180,7 +318,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 <label for="${field.id}" class="text-gray-200 text-sm">${field.label}</label>
                 <button type="button" class="reasoning-bubble-btn hidden" data-reasoning-target="${field.id}" aria-label="Show AI reasoning"><svg class="h-4 w-4 text-gray-300 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>
             </div>
-            ${controlHTML}
+             <div class="flex items-center space-x-2">
+                ${controlHTML}
+                ${lockButtonHTML}
+            </div>
         </div>
         <div id="${field.id}_context" class="hidden mt-2">
             <textarea name="${field.id}_context" class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white placeholder-gray-200 text-sm" rows="3" placeholder="Context for '${field.label}'"></textarea>
@@ -189,17 +330,37 @@ document.addEventListener("DOMContentLoaded", () => {
       dom.annotationFieldsContainer.appendChild(row);
     });
 
-    // Re-attach event listeners for newly created elements
+    // Add event listeners for the new boolean button groups
+    document.querySelectorAll(".boolean-button-group").forEach((group) => {
+      const hiddenInput = group.querySelector('input[type="hidden"]');
+      group.querySelectorAll(".boolean-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          const selectedValue = button.dataset.value;
+          if (button.classList.contains("active")) {
+            hiddenInput.value = "";
+            button.classList.remove("active");
+          } else {
+            hiddenInput.value = selectedValue;
+            group
+              .querySelectorAll(".boolean-btn")
+              .forEach((btn) => btn.classList.remove("active"));
+            button.classList.add("active");
+          }
+          hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+      });
+    });
+
     ui.setupContextToggles();
     document
       .querySelectorAll(".highlight-toggle-btn")
       .forEach((btn) => btn.addEventListener("click", onHighlightToggle));
+    initializeAutoFill(template);
   }
 
   async function handleDatasetChange() {
     const selectedDataset = dom.datasetSelector.value;
     if (!selectedDataset || !state.currentSheetId) {
-      // Don't proceed if no dataset or sheet is selected
       return;
     }
     state.currentDataset = selectedDataset;
@@ -208,12 +369,46 @@ document.addEventListener("DOMContentLoaded", () => {
       selectedDataset
     );
 
-    ui.showLoading("Loading Dataset", "Filtering against sheet records...");
+    ui.showLoading("Loading Session", "Checking for resumable papers...");
+
     try {
+      // Step 1: ALWAYS check for a resumable paper first.
+      const annotatorName = localStorage.getItem("annotatorName");
+      let doiToSkip = null;
+
+      if (annotatorName) {
+        const resumable = await api.checkForResumablePaper(annotatorName);
+        if (resumable && resumable.resumable) {
+          const resume = confirm(
+            `You were previously working on the paper:\n\n"${resumable.title}"\n\nWould you like to resume?`
+          );
+          if (resume) {
+            // User wants to resume. Load the dataset first, then fetch the specific paper.
+            // This ensures the queue is ready for when they finish the resumed paper.
+            ui.showLoading("Loading Dataset", "Please wait...");
+            await api.loadDataset(state.currentDataset);
+            await fetchAndDisplaySpecificPaper(resumable.doi);
+            return; // EXIT here, we are done.
+          } else {
+            // User declined. Release the lock and mark this DOI to be skipped for the *next* fetch.
+            ui.showToastNotification(
+              "Lock released. Finding a new paper...",
+              "info"
+            );
+            await api.skipPaper(state.currentDataset, resumable.doi);
+            doiToSkip = resumable.doi; // IMPORTANT: Remember which one to skip.
+          }
+        }
+      }
+
+      // Step 2: Load the dataset. This populates the queue.
+      ui.showLoading("Loading Dataset", "Filtering against sheet records...");
       const result = await api.loadDataset(state.currentDataset);
       state.totalPapersInQueue = result.queued_count;
       state.annotatedInSession = 0;
-      await fetchAndDisplayNextPaper();
+
+      // Step 3: Fetch the next paper, passing the DOI to skip if the user declined resumption.
+      await fetchAndDisplayNextPaper(0, doiToSkip);
     } catch (error) {
       ui.hideLoading();
       alert(`Error loading dataset: ${error.message}`);
@@ -341,7 +536,64 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function fetchAndDisplayNextPaper(retryCount = 0) {
+  async function fetchAndDisplaySpecificPaper(doi) {
+    if (!state.currentDataset) return;
+    stopLockTimer();
+    ui.showLoading(
+      "Resuming Session",
+      "Please wait while we fetch your previous paper..."
+    );
+
+    try {
+      state.currentPaper = await api.fetchPaperByDoi(doi, state.currentDataset);
+      await displayPaper(state.currentPaper);
+    } catch (error) {
+      ui.hideLoading();
+      alert(
+        `Error resuming paper: ${error.message}. Getting a new paper instead.`
+      );
+      await fetchAndDisplayNextPaper();
+    }
+  }
+
+  async function displayPaper(paper) {
+    state.currentPaper = paper;
+
+    // Make the main panels visible now that we have data
+    dom.paperView.classList.remove("hidden");
+    dom.annotationView.classList.remove("hidden");
+    dom.paperContentContainer.classList.remove("hidden");
+
+    if (window.innerWidth >= 1024) {
+      resizeHandle.style.display = "flex";
+    } else {
+      resizeHandle.style.display = "none";
+    }
+
+    const { originalAbstractHTML, originalFullTextHTML } = await ui.renderPaper(
+      state.currentPaper
+    );
+
+    // --- Pass the initial lock info from the API response ---
+    startLockTimer(state.currentPaper.lock_info);
+
+    state.originalAbstractHTML = originalAbstractHTML;
+    state.originalFullTextHTML = originalFullTextHTML;
+    state.activeHighlightIds.clear();
+    document
+      .querySelectorAll(".highlight-toggle-btn")
+      .forEach((btn) => btn.classList.remove("active"));
+    highlighting.updateAllHighlights(
+      state.activeHighlightIds,
+      state.originalAbstractHTML,
+      state.originalFullTextHTML,
+      state.activeTemplate
+    );
+    // Hide loading on success
+    ui.hideLoading();
+  }
+
+  async function fetchAndDisplayNextPaper(retryCount = 0, skipDoi = null) {
     if (!state.currentDataset) return;
 
     stopLockTimer();
@@ -354,39 +606,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     try {
-      state.currentPaper = await api.fetchNextPaper(state.currentDataset);
-
-      // Make the main panels visible now that we have data
-      dom.paperView.classList.remove("hidden");
-      dom.annotationView.classList.remove("hidden");
-      dom.paperContentContainer.classList.remove("hidden");
-
-      if (window.innerWidth >= 1024) {
-        resizeHandle.style.display = "flex";
-      } else {
-        resizeHandle.style.display = "none";
-      }
-
-      const { originalAbstractHTML, originalFullTextHTML } =
-        await ui.renderPaper(state.currentPaper);
-
-      // --- Pass the initial lock info from the API response ---
-      startLockTimer(state.currentPaper.lock_info);
-
-      state.originalAbstractHTML = originalAbstractHTML;
-      state.originalFullTextHTML = originalFullTextHTML;
-      state.activeHighlightIds.clear();
-      document
-        .querySelectorAll(".highlight-toggle-btn")
-        .forEach((btn) => btn.classList.remove("active"));
-      highlighting.updateAllHighlights(
-        state.activeHighlightIds,
-        state.originalAbstractHTML,
-        state.originalFullTextHTML,
-        state.activeTemplate
-      );
-      // Hide loading on success
-      ui.hideLoading();
+      const paper = await api.fetchNextPaper(state.currentDataset, skipDoi);
+      await displayPaper(paper);
     } catch (error) {
       // If the paper was locked by someone else, and we haven't retried too many times...
       if (error.message.includes("locked by another user") && retryCount < 5) {
@@ -399,7 +620,7 @@ document.addEventListener("DOMContentLoaded", () => {
         );
         // Automatically try to get the next paper again after a short delay.
         await new Promise((resolve) => setTimeout(resolve, 500));
-        return fetchAndDisplayNextPaper(retryCount + 1);
+        return fetchAndDisplayNextPaper(retryCount + 1, skipDoi);
       }
 
       // For any other error, or if we've retried too many times, show the final alert.
@@ -427,11 +648,15 @@ document.addEventListener("DOMContentLoaded", () => {
     state.activeTemplate.fields.forEach((field) => {
       const element = document.getElementById(field.id);
       if (element) {
+        let value = element.value;
         if (field.type === "boolean") {
-          annotations[field.id] = element.checked ? "TRUE" : "FALSE";
+          if (value === "true") annotations[field.id] = "TRUE";
+          else if (value === "false") annotations[field.id] = "FALSE";
+          else annotations[field.id] = ""; // Keep it empty if unselected
         } else {
-          annotations[field.id] = element.value;
+          annotations[field.id] = value;
         }
+
         const contextEl = document.querySelector(
           `[name="${field.id}_context"]`
         );
@@ -1226,18 +1451,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function setupManualUploadListener() {
-    // Use event delegation on a static parent.
-    dom.pdfViewerContainer.addEventListener("click", (event) => {
-      if (event.target.id === "manual-upload-trigger") {
-        const uploader = document.getElementById("manual-pdf-upload");
-        uploader.dataset.expectedFilename =
-          event.target.dataset.expectedFilename;
-        uploader.click();
-      }
-    });
-  }
-
   // scripts/script.js
 
   async function init() {
@@ -1277,22 +1490,73 @@ document.addEventListener("DOMContentLoaded", () => {
     dom.getSuggestionsBtn.addEventListener("click", handleGetSuggestions);
 
     // --- DELEGATED EVENT LISTENERS FOR DYNAMIC CONTENT ---
-    // This is the main change. We listen on `document.body` which always exists.
+    dom.annotationFieldsContainer.addEventListener("click", (event) => {
+      // Manual lock toggling
+      const lockBtn = event.target.closest(".autofill-lock-btn");
+      if (lockBtn) {
+        const fieldId = lockBtn.dataset.targetLock;
+        const fieldEl = document.getElementById(fieldId);
+        const fieldLabel =
+          state.activeTemplate.fields.find((f) => f.id === fieldId)?.label ||
+          fieldId;
+
+        if (fieldEl) {
+          const isNowLocked = !(fieldEl.dataset.locked === "true");
+          fieldEl.dataset.locked = isNowLocked;
+          lockBtn
+            .querySelector(".icon-unlocked")
+            .classList.toggle("hidden", isNowLocked);
+          lockBtn
+            .querySelector(".icon-locked")
+            .classList.toggle("hidden", !isNowLocked);
+          lockBtn.classList.toggle("active", isNowLocked);
+
+          const message = isNowLocked
+            ? `Field '${fieldLabel}' is now locked and will not be auto-filled.`
+            : `Field '${fieldLabel}' is now unlocked and can be auto-filled.`;
+          ui.showToastNotification(message, "info");
+        }
+        return;
+      }
+    });
+
+    // Consolidated listener for manual changes to auto-lock fields
+    dom.annotationFieldsContainer.addEventListener("change", (event) => {
+      // Only act on direct user interactions
+      if (!event.isTrusted) return;
+
+      const fieldEl = event.target;
+
+      // If the user manually changes a field that was previously auto-filled,
+      // we should lock it to protect their choice.
+      if (fieldEl.dataset.autofilledBy) {
+        if (!fieldEl.dataset.locked || fieldEl.dataset.locked === "false") {
+          const lockButton = fieldEl
+            .closest(".annotation-row")
+            .querySelector(".autofill-lock-btn");
+          if (lockButton) {
+            lockButton.click(); // This will toggle the lock state and icon
+          }
+        }
+        // After locking it, we remove the autofill tag because the value is now manually set.
+        delete fieldEl.dataset.autofilledBy;
+      }
+    });
+
     document.body.addEventListener("click", (event) => {
-      // This part handles clicking the "Upload Manually" button.
+      // Manual PDF upload trigger
       if (event.target.id === "manual-upload-trigger") {
         const uploader = document.getElementById("manual-pdf-upload");
         if (uploader) {
-          // Pass the expected filename from the button to the input
           uploader.dataset.expectedFilename =
             event.target.dataset.expectedFilename;
-          uploader.click(); // Programmatically click the hidden file input
+          uploader.click();
         }
       }
     });
 
     document.body.addEventListener("change", (event) => {
-      // This part handles what happens after you've selected a file.
+      // Handling the file after selection for manual upload
       if (event.target.id === "manual-pdf-upload") {
         handleManualPdfUpload(event);
       }

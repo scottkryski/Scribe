@@ -48,7 +48,9 @@ function setupEventListeners() {
   addFieldBtn.addEventListener("click", () => {
     const newIndex =
       templateBuilderContainer.querySelectorAll(".field-editor").length;
-    const newFieldElement = renderFieldEditor(null, newIndex);
+    // We need the current list of fields to populate the target dropdown
+    const allFields = readAllFieldsFromDOM();
+    const newFieldElement = renderFieldEditor(null, newIndex, allFields);
     templateBuilderContainer.appendChild(newFieldElement);
   });
 
@@ -131,13 +133,62 @@ function renderTemplateEditor() {
   templateBuilderContainer.innerHTML = "";
   if (!currentTemplateData || !currentTemplateData.fields) return;
 
-  currentTemplateData.fields.forEach((field, index) => {
-    const fieldElement = renderFieldEditor(field, index);
+  const allFields = currentTemplateData.fields;
+
+  allFields.forEach((field, index) => {
+    const fieldElement = renderFieldEditor(field, index, allFields);
     templateBuilderContainer.appendChild(fieldElement);
   });
 }
 
-function renderFieldEditor(field, index) {
+function renderSingleRuleEditor(rule, allFields, triggerFieldId) {
+  const ruleData = rule || {
+    triggerValue: "",
+    targetId: "",
+    targetValue: "",
+  };
+
+  // Create options for the target ID select, excluding the trigger field itself
+  const targetOptionsHTML = allFields
+    .filter((f) => f.id !== triggerFieldId)
+    .map(
+      (f) =>
+        `<option value="${f.id}" ${
+          ruleData.targetId === f.id ? "selected" : ""
+        }>${f.label || f.id}</option>`
+    )
+    .join("");
+
+  const ruleWrapper = document.createElement("div");
+  ruleWrapper.className =
+    "autofill-rule-editor grid grid-cols-1 md:grid-cols-4 gap-2 items-end bg-black bg-opacity-20 p-2 rounded-lg";
+  ruleWrapper.innerHTML = `
+        <div class="md:col-span-1">
+            <label class="text-xs font-medium">When value is...</label>
+            <input type="text" value="${ruleData.triggerValue}" class="w-full p-1 bg-white bg-opacity-10 rounded text-white text-xs rule-trigger-value" placeholder="e.g., true or Review">
+        </div>
+        <div class="md:col-span-1">
+            <label class="text-xs font-medium">...then set field...</label>
+            <select class="custom-select w-full p-1 bg-white bg-opacity-10 rounded text-white text-xs rule-target-id">
+                <option value="">-- Select Target --</option>
+                ${targetOptionsHTML}
+            </select>
+        </div>
+        <div class="md:col-span-1">
+            <label class="text-xs font-medium">...to value...</label>
+            <input type="text" value="${ruleData.targetValue}" class="w-full p-1 bg-white bg-opacity-10 rounded text-white text-xs rule-target-value" placeholder="e.g., false or Irrelevant">
+        </div>
+        <button type="button" class="delete-rule-btn p-1 rounded glass-hover text-red-400 self-center justify-self-end">Delete Rule</button>
+    `;
+
+  ruleWrapper
+    .querySelector(".delete-rule-btn")
+    .addEventListener("click", () => ruleWrapper.remove());
+
+  return ruleWrapper;
+}
+
+function renderFieldEditor(field, index, allFields) {
   const fieldData = field || {
     id: `new_field_${Date.now()}`,
     label: "",
@@ -146,6 +197,7 @@ function renderFieldEditor(field, index) {
     keywords: [],
     options: [],
     ai_summary_field: "context",
+    autoFillRules: [],
   };
 
   const fieldWrapper = document.createElement("div");
@@ -226,7 +278,40 @@ function renderFieldEditor(field, index) {
                 }</textarea>
             </div>
         </div>
+        <!-- Auto-fill rules section -->
+        <div class="pt-3 mt-3 border-t border-white/10">
+            <h4 class="text-md font-semibold mb-2">Automatic Fill-in Rules</h4>
+            <div class="autofill-rules-container space-y-2">
+                <!-- JS will populate this -->
+            </div>
+            <button type="button" class="add-autofill-rule-btn btn-primary text-sm px-3 py-1 mt-2">Add Rule</button>
+        </div>
     `;
+
+  // Populate auto-fill rules
+  const rulesContainer = fieldWrapper.querySelector(
+    ".autofill-rules-container"
+  );
+  if (fieldData.autoFillRules) {
+    fieldData.autoFillRules.forEach((rule) => {
+      const ruleEditor = renderSingleRuleEditor(rule, allFields, fieldData.id);
+      rulesContainer.appendChild(ruleEditor);
+    });
+  }
+
+  // Add event listener for adding new rules
+  fieldWrapper
+    .querySelector(".add-autofill-rule-btn")
+    .addEventListener("click", (e) => {
+      const allCurrentFields = readAllFieldsFromDOM();
+      const triggerId = fieldWrapper.querySelector(".field-id-input").value;
+      const newRuleEditor = renderSingleRuleEditor(
+        null,
+        allCurrentFields,
+        triggerId
+      );
+      e.target.previousElementSibling.appendChild(newRuleEditor);
+    });
 
   fieldWrapper
     .querySelector(".delete-field-btn")
@@ -236,13 +321,17 @@ function renderFieldEditor(field, index) {
     .querySelector(".field-type-selector")
     .addEventListener("change", (e) => {
       const parent = e.target.closest(".field-editor");
-      // Get the current index dynamically to pass to the re-render
+      const allCurrentFields = readAllFieldsFromDOM();
       const currentIndex = Array.from(parent.parentNode.children).indexOf(
         parent
       );
       const updatedFieldData = readFieldDataFromDOM(parent);
       updatedFieldData.type = e.target.value;
-      const newEditor = renderFieldEditor(updatedFieldData, currentIndex);
+      const newEditor = renderFieldEditor(
+        updatedFieldData,
+        currentIndex,
+        allCurrentFields
+      );
       parent.replaceWith(newEditor);
     });
 
@@ -270,6 +359,14 @@ function renderFieldEditor(field, index) {
   return fieldWrapper;
 }
 
+function readAllFieldsFromDOM() {
+  const fields = [];
+  document.querySelectorAll(".field-editor").forEach((editor) => {
+    fields.push(readFieldDataFromDOM(editor));
+  });
+  return fields;
+}
+
 function readFieldDataFromDOM(fieldEditorDiv) {
   const getVal = (selector) =>
     fieldEditorDiv.querySelector(selector)?.value.trim() || "";
@@ -280,6 +377,21 @@ function readFieldDataFromDOM(fieldEditorDiv) {
       .filter(Boolean);
 
   const type = getVal(".field-type-selector");
+
+  const autoFillRules = [];
+  fieldEditorDiv
+    .querySelectorAll(".autofill-rule-editor")
+    .forEach((ruleEditor) => {
+      const triggerValue = ruleEditor.querySelector(
+        ".rule-trigger-value"
+      ).value;
+      const targetId = ruleEditor.querySelector(".rule-target-id").value;
+      const targetValue = ruleEditor.querySelector(".rule-target-value").value;
+      if (triggerValue && targetId && targetValue) {
+        autoFillRules.push({ triggerValue, targetId, targetValue });
+      }
+    });
+
   const fieldData = {
     label: getVal(".field-label-input"),
     id: getVal(".field-id-input"),
@@ -288,15 +400,13 @@ function readFieldDataFromDOM(fieldEditorDiv) {
     keywords: getArr(".field-keywords-textarea", ","),
     options: type === "select" ? getArr(".field-options-textarea", "\n") : [],
     ai_summary_field: getVal(".field-ai-summary-selector") || "context",
+    autoFillRules: autoFillRules,
   };
   return fieldData;
 }
 
 async function saveCurrentTemplate() {
-  const newFields = [];
-  document.querySelectorAll(".field-editor").forEach((editor) => {
-    newFields.push(readFieldDataFromDOM(editor));
-  });
+  const newFields = readAllFieldsFromDOM();
 
   const updatedTemplate = {
     name: currentTemplateData.name,
