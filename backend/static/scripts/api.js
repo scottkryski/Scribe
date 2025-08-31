@@ -82,7 +82,6 @@ export async function fetchGeminiSuggestions(
 // --- Dataset and Paper Management ---
 
 export async function getDatasets() {
-  // Add a cache-busting parameter (_=timestamp) to prevent pywebview from serving a stale response.
   const response = await fetch(
     `${API_BASE_URL}/get-datasets?_=${new Date().getTime()}`
   );
@@ -212,7 +211,7 @@ export async function downloadPdf(pdfData) {
     const filename = `${author}${year}-${titleFragment}.pdf`;
 
     errorData.expected_filename = filename;
-    errorData.attempted_url = pdfData.url; // Pass the URL for better error reporting
+    errorData.attempted_url = pdfData.url;
     throw errorData;
   }
 
@@ -224,7 +223,6 @@ export async function downloadPdf(pdfData) {
 export async function uploadPdf(file, expectedFilename) {
   const formData = new FormData();
   formData.append("file", file);
-  // Add the expected filename to the form data to be sent to the backend
   formData.append("expected_filename", expectedFilename);
 
   const response = await fetch(`${API_BASE_URL}/upload-pdf`, {
@@ -374,12 +372,27 @@ export async function checkForUpdates() {
 }
 
 export async function triggerUpdateAndRestart() {
-  // This request will likely not get a response because the server shuts down.
-  // We use a try/catch to prevent an error from showing in the console.
   try {
     await fetch(`${API_BASE_URL}/update-and-restart`, { method: "POST" });
   } catch (error) {
-    // This error is expected as the server connection will be cut.
     console.log("Server shutdown initiated for update.");
+  }
+}
+
+// --- Application Status ---
+export async function getAppStatus() {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/status?_=${new Date().getTime()}`
+    );
+    if (!response.ok) {
+      return { status: "error", message: "Cannot connect to server." };
+    }
+    return await response.json();
+  } catch (error) {
+    return {
+      status: "error",
+      message: "Server is not responding. Please wait...",
+    };
   }
 }

@@ -19,8 +19,11 @@ import sys
 import subprocess
 import shutil
 from bs4 import BeautifulSoup
+import asyncio
 
 from ai_requests import get_gemini_response, get_gemini_models, configure_genai
+# --- NEW: Import database functions ---
+from database import index_dataset_if_needed, get_papers_index, get_paper_by_doi_from_file
 
 # --- PYINSTALLER CHANGE: Helper function to find bundled files ---
 def resource_path(relative_path):
@@ -80,6 +83,11 @@ DEFAULT_TEMPLATE_FILE = resource_path("templates/default.json")
 app = FastAPI(title="Scribe API")
 origins = ["null", "http://127.0.0.1:5500", "http://localhost:8080", "http://127.0.0.1:8000"]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# --- App State for startup readiness ---
+app.state.ready_event = asyncio.Event()
+app.state.startup_message = "Initializing..."
+app.state.startup_error = None
 
 # --- Global State & Models ---
 DATASET_QUEUES: Dict[str, List[dict]] = {}
@@ -147,6 +155,17 @@ async def read_root():
             return HTMLResponse(content=f.read(), status_code=200)
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail=f"Server configuration error: index.html not found at {html_file_path}")
+
+@app.get("/api/status")
+async def get_app_status():
+    """Endpoint for the frontend to poll the server's startup status."""
+    if not app.state.ready_event.is_set():
+        return {"status": "starting", "message": app.state.startup_message}
+    
+    if app.state.startup_error:
+        return {"status": "error", "message": app.state.startup_error}
+        
+    return {"status": "ready"}
     
 @app.get("/settings", response_class=HTMLResponse)
 async def read_settings():
@@ -166,64 +185,75 @@ async def read_guide():
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="guide.html not found")
 
-@app.on_event("startup")
-def startup_event():
+def run_startup_tasks():
+    """Contains the original blocking startup logic."""
     global gspread_client, AVAILABLE_DATASETS
-    print("LOG: --- Application Startup ---")
+    print("LOG: --- Background Startup Tasks Running ---")
     
-    # This logic for finding/creating a .env file is acceptable for distribution,
-    # as the user sets the key via the UI.
-    env_path_str = find_dotenv()
-    if env_path_str:
-        print(f"LOG: Loading .env file from: {env_path_str}")
-        load_dotenv(dotenv_path=env_path_str)
-    else:
-        print("LOG: No .env file found. It will be created if an API key is saved via the UI.")
-    
-    configure_genai()
-    print("LOG: GenAI configured with environment variables.")
-
-    print("LOG: Creating required directories...")
-    PDF_DIR.mkdir(exist_ok=True)
-    DATA_DIR.mkdir(exist_ok=True)
-    TEMPLATES_DIR.mkdir(exist_ok=True)
-    
-    # Create sheets config file if it doesn't exist
-    if not SHEETS_CONFIG_FILE.exists():
-        print(f"LOG: Sheets configuration not found. Creating empty file at {SHEETS_CONFIG_FILE}")
-        with open(SHEETS_CONFIG_FILE, 'w') as f:
-            json.dump([], f)
-
-    # The static directory is bundled, so we don't need to create it.
-
-    # Create a default template if the directory is empty
-    if not any(TEMPLATES_DIR.iterdir()):
-        print("LOG: Templates directory is empty. Creating default template.")
-        shutil.copy(DEFAULT_TEMPLATE_FILE, TEMPLATES_DIR / "default.json")
-
     try:
+        app.state.startup_message = "Loading environment variables..."
+        env_path_str = find_dotenv()
+        if env_path_str:
+            print(f"LOG: Loading .env file from: {env_path_str}")
+            load_dotenv(dotenv_path=env_path_str)
+        else:
+            print("LOG: No .env file found. It will be created if an API key is saved via the UI.")
+        
+        configure_genai()
+        print("LOG: GenAI configured with environment variables.")
+
+        app.state.startup_message = "Creating required directories..."
+        print("LOG: Creating required directories...")
+        PDF_DIR.mkdir(exist_ok=True)
+        DATA_DIR.mkdir(exist_ok=True)
+        TEMPLATES_DIR.mkdir(exist_ok=True)
+        
+        if not SHEETS_CONFIG_FILE.exists():
+            print(f"LOG: Sheets configuration not found. Creating empty file at {SHEETS_CONFIG_FILE}")
+            with open(SHEETS_CONFIG_FILE, 'w') as f:
+                json.dump([], f)
+
+        if not any(TEMPLATES_DIR.iterdir()):
+            print("LOG: Templates directory is empty. Creating default template.")
+            shutil.copy(DEFAULT_TEMPLATE_FILE, TEMPLATES_DIR / "default.json")
+
+        app.state.startup_message = "Authenticating with Google Services..."
         print("LOG: Authenticating with Google Service Account...")
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.file"]
 
         gspread_client = gspread.service_account(filename=CREDS_FILE, scopes=scopes)
         print("LOG: Successfully authenticated with Google Service Account.")
         
-        # Discover local dataset files
-        print("LOG: Discovering local dataset files...")
-        for filepath in DATA_DIR.glob("*.jsonl"):
+        app.state.startup_message = "Discovering local datasets..."
+        print("LOG: Discovering and indexing local dataset files...")
+        
+        files_to_index = list(DATA_DIR.glob("*.jsonl"))
+        total_files = len(files_to_index)
+        
+        for i, filepath in enumerate(files_to_index):
             dataset_name = filepath.name
+            app.state.startup_message = f"Indexing dataset {i+1}/{total_files}: {dataset_name}"
             AVAILABLE_DATASETS[dataset_name] = filepath
-        print(f"LOG: Discovered {len(AVAILABLE_DATASETS)} available dataset files.")
+            index_dataset_if_needed(filepath)
+            
+        print(f"LOG: Discovered and indexed {len(AVAILABLE_DATASETS)} available dataset files.")
 
-        # Signal readiness
-        if hasattr(app.state, 'ready_event'):
-            app.state.ready_event.set()
-        print("LOG: --- Startup Complete ---")
     except Exception as e:
-        print(f"FATAL ERROR during initialization: {e}")
-        print("Could not authenticate with Google. Annotation features will be limited.")
-        if hasattr(app.state, 'ready_event'):
-            app.state.ready_event.set()
+        error_message = f"FATAL ERROR during initialization: {e}"
+        print(error_message)
+        print("Annotation features may be limited due to startup error.")
+        app.state.startup_error = str(e)
+    finally:
+        # Signal that startup is complete, regardless of success or failure
+        app.state.ready_event.set()
+        print("LOG: --- Startup Process Finished ---")
+
+@app.on_event("startup")
+async def startup_event():
+    """Launches the blocking startup tasks in a background thread."""
+    print("LOG: --- Application Startup Event Triggered ---")
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, run_startup_tasks)
 
 @app.post("/save-api-key")
 def save_api_key(request: ApiKeyRequest):
@@ -343,43 +373,29 @@ async def get_gemini_suggestions(request: GeminiRequest):
         raise HTTPException(status_code=500, detail=f"An error occurred while communicating with the AI model: {e}")
 
 
+# --- MODIFIED: /load-dataset endpoint ---
 @app.post("/load-dataset")
 def load_dataset(request: LoadRequest):
     dataset_name = request.dataset
-    if dataset_name in DATASET_QUEUES:
-        print(f"LOG: Dataset '{dataset_name}' is already in memory. Reloading to ensure consistency.")
-
     if dataset_name not in AVAILABLE_DATASETS:
         raise HTTPException(status_code=404, detail=f"Dataset file '{dataset_name}' not found on server.")
 
-    filepath = AVAILABLE_DATASETS[dataset_name]
-    print(f"LOG: Processing dataset: {dataset_name}. Prioritize incomplete: {request.prioritize_incomplete}")
-    all_papers = []
+    print(f"LOG: Loading dataset '{dataset_name}' from index. Prioritize incomplete: {request.prioritize_incomplete}")
+    
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            content = f.read()
+        all_papers_from_index = get_papers_index(dataset_name)
+        # --- ADDED: Diagnostic Logging ---
+        print(f"DEBUG: Found {len(all_papers_from_index)} papers in the index for {dataset_name}.")
+        total_in_file = len(all_papers_from_index)
 
-        decoder = json.JSONDecoder()
-        idx = 0
-        while idx < len(content):
-            while idx < len(content) and content[idx].isspace():
-                idx += 1
-            if idx == len(content):
-                break
-            try:
-                obj, end_idx = decoder.raw_decode(content, idx)
-                all_papers.append(obj)
-                idx = end_idx
-            except json.JSONDecodeError as e:
-                print(f"  -> JSON decoding error in {dataset_name} at char {idx}. Skipping rest of file.")
-                print(f"  -> Error: {e}")
-                break
-        
-        total_in_file = len(all_papers)
+        if total_in_file == 0:
+            DATASET_QUEUES[dataset_name] = []
+            return {"status": "success", "dataset": dataset_name, "queued_count": 0, "total_in_file": 0}
+
         incomplete_queue = []
         new_paper_queue = []
 
-        for paper in all_papers:
+        for paper in all_papers_from_index:
             doi = paper.get('doi')
             if not doi:
                 continue
@@ -396,22 +412,23 @@ def load_dataset(request: LoadRequest):
         
         if request.prioritize_incomplete:
             final_queue = incomplete_queue + new_paper_queue
-            print("LOG: Prioritizing incomplete annotations at the front of the queue.")
         else:
             combined_queue = incomplete_queue + new_paper_queue
             random.shuffle(combined_queue)
             final_queue = combined_queue
-            print("LOG: Shuffling incomplete annotations with the rest of the queue.")
 
+        # --- ADDED: Diagnostic Logging ---
+        print(f"DEBUG: Final queue for {dataset_name} has {len(final_queue)} papers.")
         DATASET_QUEUES[dataset_name] = final_queue
         
         queued_count = len(final_queue)
         print(f"LOG: Finished processing. Total in file: {total_in_file}, Added to Queue: {queued_count}.")
+        
         return {"status": "success", "dataset": dataset_name, "queued_count": queued_count, "total_in_file": total_in_file}
 
     except Exception as e:
-        print(f"ERROR: Failed to load and process dataset '{dataset_name}'. Error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to process dataset file: {e}")
+        print(f"ERROR: Failed to load dataset '{dataset_name}' from index. Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process dataset from index: {e}")
 
 
 @app.post("/download-pdf")
@@ -515,6 +532,22 @@ async def upload_pdf(file: UploadFile = File(...), expected_filename: str = Form
 @app.get("/get-datasets")
 def get_datasets():
     print("LOG: Requesting list of available datasets.")
+    # --- MODIFIED: Re-scan directory to catch newly added files ---
+    # This is a lightweight way to ensure new files are discoverable without a restart.
+    current_datasets = {f.name for f in DATA_DIR.glob("*.jsonl")}
+    for name in current_datasets:
+        if name not in AVAILABLE_DATASETS:
+            filepath = DATA_DIR / name
+            AVAILABLE_DATASETS[name] = filepath
+            # Index the new dataset on-the-fly
+            print(f"LOG: Discovered new dataset '{name}', indexing now.")
+            index_dataset_if_needed(filepath)
+    
+    # Clean up datasets that might have been deleted
+    for name in list(AVAILABLE_DATASETS.keys()):
+        if name not in current_datasets:
+            del AVAILABLE_DATASETS[name]
+
     return sorted(list(AVAILABLE_DATASETS.keys()))
 
 @app.get("/check-for-resumable-paper")
@@ -534,73 +567,71 @@ def check_for_resumable_paper(annotator: str):
             return {"resumable": False}
         
         headers = all_values[0]
-        # Ensure all required columns exist
-        if not all(h in headers for h in ['doi', 'title', 'lock_annotator', 'lock_timestamp']):
-            print("WARN-LOG: Sheet is missing one of the required columns for resumption check.")
+        required_cols = ['doi', 'title', 'dataset', 'lock_annotator', 'lock_timestamp']
+        if not all(h in headers for h in required_cols):
+            print("WARN-LOG: Sheet is missing one of the required columns for resumption check (doi, title, dataset, lock_annotator, lock_timestamp).")
             return {"resumable": False}
 
         doi_idx = headers.index('doi')
         title_idx = headers.index('title')
+        dataset_idx = headers.index('dataset')
         lock_annotator_idx = headers.index('lock_annotator')
         lock_timestamp_idx = headers.index('lock_timestamp')
 
-        # Iterate backwards as it's more likely a recent lock
         for row in reversed(all_values[1:]):
-            # Check for row length to avoid IndexError
-            if len(row) > max(lock_annotator_idx, lock_timestamp_idx, doi_idx, title_idx):
+            if len(row) > max(lock_annotator_idx, lock_timestamp_idx, doi_idx, title_idx, dataset_idx):
                 lock_holder = row[lock_annotator_idx]
                 lock_time_str = row[lock_timestamp_idx]
+                dataset_name = row[dataset_idx] # Get dataset from the row
 
-                if lock_holder == annotator and lock_time_str:
+                # FIX: Ensure the dataset cell is not empty for a valid resumable paper
+                if lock_holder == annotator and lock_time_str and dataset_name:
                     try:
                         lock_time = float(lock_time_str)
                         if time.time() - lock_time < LOCK_TIMEOUT_SECONDS:
-                            print(f"LOG: Found resumable paper for {annotator}. DOI: {row[doi_idx]}")
+                            print(f"LOG: Found resumable paper for {annotator}. DOI: {row[doi_idx]} in dataset: {dataset_name}")
                             return {
                                 "resumable": True,
                                 "doi": row[doi_idx],
-                                "title": row[title_idx]
+                                "title": row[title_idx],
+                                "dataset": dataset_name
                             }
                     except (ValueError, TypeError):
-                        # Ignore rows with invalid timestamp format
                         continue
         
         print(f"LOG: No resumable paper found for {annotator}.")
         return {"resumable": False}
     except Exception as e:
         print(f"ERROR: Could not check for resumable paper due to an error: {e}")
-        # In case of any error, we don't block the user.
         return {"resumable": False}
 
+# --- MODIFIED: /get-paper-by-doi endpoint ---
 @app.get("/get-paper-by-doi")
 def get_paper_by_doi(doi: str, dataset: str):
-    """Fetches a specific paper by its DOI from a given dataset file."""
+    """Fetches a specific paper by its DOI from a given dataset file using the index."""
     print(f"LOG: Request to fetch paper with DOI '{doi}' from dataset '{dataset}'.")
     if dataset not in AVAILABLE_DATASETS:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found on server.")
 
     filepath = AVAILABLE_DATASETS[dataset]
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    paper_data = json.loads(line)
-                    if paper_data.get("doi") == doi:
-                        print(f"LOG: Found paper with DOI '{doi}' in {dataset}.")
-                        # Check and attach lock status before returning
-                        lock_status = get_lock_status(doi)
-                        paper_data['lock_info'] = lock_status
-                        if doi in INCOMPLETE_ANNOTATIONS:
-                             paper_data['existing_annotation'] = INCOMPLETE_ANNOTATIONS[doi]['data']
-                        return paper_data
-                except json.JSONDecodeError:
-                    continue # Ignore corrupted lines
-
+    
+    # FIX: Removed the overly broad try/except block.
+    # This allows the specific HTTPException (404 Not Found) to be returned correctly
+    # instead of being caught and converted into a generic 500 Server Error.
+    paper_data = get_paper_by_doi_from_file(filepath, doi)
+    
+    if paper_data:
+        print(f"LOG: Found paper with DOI '{doi}' in {dataset} via index.")
+        lock_status = get_lock_status(doi)
+        paper_data['lock_info'] = lock_status
+        if doi in INCOMPLETE_ANNOTATIONS:
+                paper_data['existing_annotation'] = INCOMPLETE_ANNOTATIONS[doi]['data']
+        return paper_data
+    else:
+        # This will now correctly return a 404 error to the frontend.
         raise HTTPException(status_code=404, detail=f"Paper with DOI '{doi}' not found in dataset '{dataset}'.")
-    except Exception as e:
-        print(f"ERROR: Failed to read or process dataset file for DOI '{doi}'. Error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve paper data.")
 
+# --- MODIFIED: /get-next-paper endpoint ---
 @app.get("/get-next-paper")
 def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip_doi: Optional[str] = None):
     print(f"\n--- LOG: GET_NEXT_PAPER triggered for dataset '{dataset}' by '{annotator}' ---")
@@ -651,94 +682,84 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
         print(f"LOG: Total unavailable DOIs (completed or locked by others): {len(unavailable_dois)}")
 
         print("LOG: Searching queue for the next available and valid paper...")
-        candidate_paper = None
+        candidate_paper_info = None
+        
+        # The queue now contains lightweight dicts.
         papers_to_check = (p for p in DATASET_QUEUES[dataset])
-        checked_count = 0
-        has_logged_exhaustion_message = False
 
-        for paper_data in papers_to_check:
-            checked_count += 1
-            doi = paper_data.get('doi')
-            is_prioritized = doi in INCOMPLETE_ANNOTATIONS
-
-            if not is_prioritized and not has_logged_exhaustion_message:
-                print("\nLOG: --- Prioritized incomplete list exhausted. Now searching through new papers. ---\n")
-                has_logged_exhaustion_message = True
-            
+        for paper_info in papers_to_check:
+            doi = paper_info.get('doi')
             if doi in unavailable_dois:
                 continue
 
             if pdf_required:
-                pdf_url_info = paper_data.get('open_access_pdf', {})
-                pdf_url = pdf_url_info.get('url') if isinstance(pdf_url_info, dict) else pdf_url_info
-
+                pdf_url = paper_info.get('open_access_pdf')
                 if not pdf_url or not isinstance(pdf_url, str) or not pdf_url.startswith('http'):
                     continue
-
-                try:
-                    browser_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-                    response = requests.get(str(pdf_url), headers=browser_headers, timeout=20, allow_redirects=True, stream=True)
-                    response.raise_for_status()
-                    content_type = response.headers.get('Content-Type', '')
-                    response.close()
-                    
-                    if 'application/pdf' not in content_type and 'text/html' not in content_type:
-                        continue
-                except requests.exceptions.RequestException:
-                    continue
+                # Note: The expensive HEAD check is removed for speed. The frontend handles download failures.
             
-            candidate_paper = paper_data
+            candidate_paper_info = paper_info
             break
 
-        if not candidate_paper:
+        if not candidate_paper_info:
             print("ERROR-LOG: No available papers with valid PDFs found in the queue after checking all items.")
             raise HTTPException(status_code=404, detail="No available papers with valid PDFs found in the queue.")
 
-        candidate_doi = candidate_paper.get('doi')
+        candidate_doi = candidate_paper_info.get('doi')
         
+        # --- NEW: Fetch the full paper data using the index ---
+        print(f"LOG: Found candidate paper {candidate_doi}. Fetching full data from source file...")
+        filepath = AVAILABLE_DATASETS[dataset]
+        full_candidate_paper = get_paper_by_doi_from_file(filepath, candidate_doi)
+        if not full_candidate_paper:
+            # This could happen if the index is out of sync or the file is corrupt.
+            # For now, we'll raise an error. A more robust solution might try the next paper.
+            raise HTTPException(status_code=500, detail=f"Could not retrieve full data for DOI {candidate_doi}. The index might be stale.")
+
         print(f"LOG: Attempting to lock paper {candidate_doi} for '{annotator}' in the sheet.")
         if doi_col_idx != -1:
             try:
                 cell = worksheet.find(candidate_doi, in_column=doi_col_idx + 1)
                 if cell:
-                    # --- EXISTING PAPER: Update the lock on the found row ---
                     row_num = cell.row
                     worksheet.update_cell(row_num, lock_annotator_col_idx + 1, annotator)
                     worksheet.update_cell(row_num, lock_timestamp_col_idx + 1, time.time())
                     print(f"LOG: Lock acquired for DOI {candidate_doi} by {annotator} in row {row_num}.")
-                    candidate_paper['lock_info'] = {"locked": True, "remaining_seconds": LOCK_TIMEOUT_SECONDS}
+                    full_candidate_paper['lock_info'] = {"locked": True, "remaining_seconds": LOCK_TIMEOUT_SECONDS}
                 else:
-                    # --- NEW PAPER: Append a new row with lock info ---
                     print(f"LOG: DOI {candidate_doi} not found in sheet. Creating new row to apply lock.")
                     
                     new_row_data = {h: "" for h in headers}
                     new_row_data['doi'] = candidate_doi
-                    new_row_data['title'] = candidate_paper.get('title', 'No Title Provided') 
+                    new_row_data['title'] = full_candidate_paper.get('title', 'No Title Provided') 
                     new_row_data['dataset'] = dataset 
                     new_row_data['lock_annotator'] = annotator
                     new_row_data['lock_timestamp'] = time.time()
-
                     row_values = [new_row_data.get(h, "") for h in headers]
-                    
                     worksheet.append_row(row_values, value_input_option='USER_ENTERED')
                     
                     print(f"LOG: Appended new row and acquired lock for DOI {candidate_doi} by {annotator}.")
-                    candidate_paper['lock_info'] = {"locked": True, "remaining_seconds": LOCK_TIMEOUT_SECONDS}
+                    full_candidate_paper['lock_info'] = {"locked": True, "remaining_seconds": LOCK_TIMEOUT_SECONDS}
 
             except Exception as e:
                 print(f"WARN-LOG: Could not lock paper {candidate_doi}. Reason: {e}")
 
         if candidate_doi in INCOMPLETE_ANNOTATIONS:
             print(f"LOG: Found existing incomplete annotation data for DOI {candidate_doi}.")
-            candidate_paper['existing_annotation'] = INCOMPLETE_ANNOTATIONS[candidate_doi]['data']
+            full_candidate_paper['existing_annotation'] = INCOMPLETE_ANNOTATIONS[candidate_doi]['data']
         
         print(f"--- LOG: GET_NEXT_PAPER finished successfully. Returning DOI {candidate_doi}. ---\n")
-        return candidate_paper
+        return full_candidate_paper
 
     except (ValueError, APIError) as e:
         print(f"ERROR-LOG: A spreadsheet error occurred in get_next_paper: {e}")
         raise HTTPException(status_code=500, detail=f"A spreadsheet error occurred: {e}")
-
+# ... (The rest of main.py remains the same) ...
+# The functions clear_lock, get_lock_status, skip_paper, submit_annotation, etc.
+# do not need to be changed as they operate on DOIs or data already fetched.
+# The Template and Sheets management APIs are also unaffected.
+# I will include the full unchanged file below for completeness.
+# ... (rest of main.py)
 def clear_lock(doi: str):
     print(f"LOG: Attempting to clear lock for DOI: {doi}")
     if not worksheet:
