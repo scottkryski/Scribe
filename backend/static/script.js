@@ -280,9 +280,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const lockButtonHTML = `
             <button type="button" class="autofill-lock-btn" data-target-lock="${field.id}" title="Lock field to prevent auto-fill">
-                <svg class="icon-unlocked" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H4.5a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
-                <svg class="icon-locked hidden" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H4.5a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+                <svg class="icon-unlocked h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H4.5a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+                <svg class="icon-locked hidden h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H4.5a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
             </button>`;
+
+      const aiActionButtonsHTML = `
+            <button type="button" class="ai-action-btn revert-ai-btn hidden" data-revert-target="${field.id}" title="Revert AI Suggestion">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
+            </button>
+            <button type="button" class="ai-action-btn clear-ai-btn hidden" data-clear-target="${field.id}" title="Clear AI Suggestion & Context">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+            `;
 
       let controlHTML = "";
       if (field.type === "boolean") {
@@ -297,7 +306,7 @@ document.addEventListener("DOMContentLoaded", () => {
           .map((opt) => `<option value="${opt}">${opt}</option>`)
           .join("");
         controlHTML = `
-          <select id="${field.id}" name="${field.id}" data-context-target="${field.id}_context" class="custom-select w-48 p-2 bg-white bg-opacity-10 rounded-lg text-white text-sm">
+          <select id="${field.id}" name="${field.id}" data-context-target="${field.id}_context" class="custom-select w-full p-2 bg-white bg-opacity-10 rounded-lg text-white text-sm">
               <option value="">[Select One]</option>
               ${optionsHTML}
           </select>`;
@@ -312,14 +321,17 @@ document.addEventListener("DOMContentLoaded", () => {
           : "";
 
       row.innerHTML = `
-        <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-2">
+        <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center space-x-2 min-w-0">
                 ${highlightButtonHTML}
-                <label for="${field.id}" class="text-gray-200 text-sm">${field.label}</label>
-                <button type="button" class="reasoning-bubble-btn hidden" data-reasoning-target="${field.id}" aria-label="Show AI reasoning"><svg class="h-4 w-4 text-gray-300 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>
+                <label for="${field.id}" class="text-gray-200 text-sm font-medium truncate" title="${field.label}">${field.label}</label>
             </div>
-             <div class="flex items-center space-x-2">
-                ${controlHTML}
+            <button type="button" class="reasoning-bubble-btn hidden" data-reasoning-target="${field.id}" aria-label="Show AI reasoning"><svg class="h-4 w-4 text-gray-300 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>
+        </div>
+        <div class="flex items-center justify-between gap-4 mt-2">
+            ${controlHTML}
+            <div class="flex items-center space-x-1 flex-shrink-0">
+                ${aiActionButtonsHTML}
                 ${lockButtonHTML}
             </div>
         </div>
@@ -1474,6 +1486,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     setupReasoningTooltips();
+    ui.setupFieldActionControls(); // ACTIVATE EVENT LISTENERS FOR REVERT/CLEAR
     setupSettingsAccordions();
 
     // Setup for settings page

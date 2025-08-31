@@ -154,8 +154,9 @@ function applyExistingAnnotation(annotationData) {
 export function applyGeminiSuggestions(suggestions, activeTemplate) {
   if (!suggestions || !activeTemplate) return;
 
+  // Hide all existing action buttons before applying new ones
   document
-    .querySelectorAll(".reasoning-bubble-btn")
+    .querySelectorAll(".reasoning-bubble-btn, .clear-ai-btn, .revert-ai-btn")
     .forEach((btn) => btn.classList.add("hidden"));
 
   for (const key in suggestions) {
@@ -164,12 +165,31 @@ export function applyGeminiSuggestions(suggestions, activeTemplate) {
     const element = document.getElementById(key);
     if (!element) continue;
 
+    const reasoningBtn = document.querySelector(
+      `.reasoning-bubble-btn[data-reasoning-target="${key}"]`
+    );
+    const contextTextarea = document.querySelector(`[name="${key}_context"]`);
+
+    // --- Store previous state before making changes ---
+    element.dataset.previousValue = element.value;
+    if (contextTextarea) {
+      contextTextarea.dataset.previousContext = contextTextarea.value;
+    }
+    if (reasoningBtn) {
+      reasoningBtn.dataset.previousReasoningText =
+        reasoningBtn.dataset.reasoningText || "";
+      reasoningBtn.dataset.wasVisible =
+        !reasoningBtn.classList.contains("hidden");
+    }
+
+    // --- Apply new suggestions ---
     const fieldDef = activeTemplate.fields.find((f) => f.id === key);
     const value = suggestions[key];
     const context = suggestions[`${key}_context`];
     const reasoning = suggestions[`${key}_reasoning`];
 
-    // Handle our new boolean button group
+    element.dataset.aiSuggested = "true";
+
     if (
       element.type === "hidden" &&
       element.parentElement.classList.contains("boolean-button-group")
@@ -182,46 +202,148 @@ export function applyGeminiSuggestions(suggestions, activeTemplate) {
         if (btn) btn.click();
       }
     } else {
-      // Handle standard select elements
       element.value = value;
     }
     element.dispatchEvent(new Event("change", { bubbles: true }));
 
-    if (element.dataset.contextTarget) {
-      const contextTextarea = document.querySelector(
-        `[name="${element.dataset.contextTarget}"]`
-      );
-      if (contextTextarea) {
-        const summaryFieldType = fieldDef?.ai_summary_field || "context";
-        let textToApply = "";
-        if (summaryFieldType === "reasoning") {
-          textToApply = reasoning || "";
-        } else {
-          textToApply = context || reasoning || "";
-        }
-        contextTextarea.value = textToApply;
+    if (element.dataset.contextTarget && contextTextarea) {
+      const summaryFieldType = fieldDef?.ai_summary_field || "context";
+      let textToApply = "";
+      if (summaryFieldType === "reasoning") {
+        textToApply = reasoning || "";
+      } else {
+        textToApply = context || reasoning || "";
       }
+      contextTextarea.value = textToApply;
     }
 
-    const reasoningBtn = document.querySelector(
-      `.reasoning-bubble-btn[data-reasoning-target="${key}"]`
-    );
     if (reasoningBtn && reasoning) {
       reasoningBtn.dataset.reasoningText = reasoning;
       reasoningBtn.classList.remove("hidden");
+
+      // Show the clear and revert buttons for this specific field
+      const clearBtn = document.querySelector(
+        `.clear-ai-btn[data-clear-target="${key}"]`
+      );
+      const revertBtn = document.querySelector(
+        `.revert-ai-btn[data-revert-target="${key}"]`
+      );
+      if (clearBtn) clearBtn.classList.remove("hidden");
+      if (revertBtn) revertBtn.classList.remove("hidden");
     }
   }
 }
 
+function clearAISuggestion(fieldId) {
+  const element = document.getElementById(fieldId);
+  if (!element) return;
+
+  const contextTextarea = document.querySelector(`[name="${fieldId}_context"]`);
+  if (contextTextarea) {
+    contextTextarea.value = "";
+  }
+
+  const reasoningBtn = document.querySelector(
+    `.reasoning-bubble-btn[data-reasoning-target="${fieldId}"]`
+  );
+  if (reasoningBtn) {
+    reasoningBtn.classList.add("hidden");
+    reasoningBtn.dataset.reasoningText = "";
+  }
+
+  // This field is no longer considered AI-suggested
+  delete element.dataset.aiSuggested;
+
+  // Hide the action buttons
+  const clearBtn = document.querySelector(
+    `.clear-ai-btn[data-clear-target="${fieldId}"]`
+  );
+  const revertBtn = document.querySelector(
+    `.revert-ai-btn[data-revert-target="${fieldId}"]`
+  );
+  if (clearBtn) clearBtn.classList.add("hidden");
+  if (revertBtn) revertBtn.classList.add("hidden");
+}
+
+function revertAIField(fieldId) {
+  const element = document.getElementById(fieldId);
+  if (!element || element.dataset.previousValue === undefined) return;
+
+  const contextTextarea = document.querySelector(`[name="${fieldId}_context"]`);
+  const reasoningBtn = document.querySelector(
+    `.reasoning-bubble-btn[data-reasoning-target="${fieldId}"]`
+  );
+
+  // Revert the main value
+  const previousValue = element.dataset.previousValue;
+  if (
+    element.type === "hidden" &&
+    element.parentElement.classList.contains("boolean-button-group")
+  ) {
+    if (element.value !== previousValue) {
+      const btn = element.parentElement.querySelector(
+        `.boolean-btn[data-value="${previousValue}"]`
+      );
+      if (btn) {
+        btn.click();
+      } else {
+        // If previous value was empty, deactivate all buttons
+        element.parentElement
+          .querySelectorAll(".boolean-btn.active")
+          .forEach((b) => b.classList.remove("active"));
+        element.value = "";
+      }
+    }
+  } else {
+    element.value = previousValue;
+  }
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+
+  // Revert context
+  if (
+    contextTextarea &&
+    contextTextarea.dataset.previousContext !== undefined
+  ) {
+    contextTextarea.value = contextTextarea.dataset.previousContext;
+  }
+
+  // Revert reasoning bubble
+  if (reasoningBtn) {
+    reasoningBtn.dataset.reasoningText =
+      reasoningBtn.dataset.previousReasoningText || "";
+    if (reasoningBtn.dataset.wasVisible === "true") {
+      reasoningBtn.classList.remove("hidden");
+    } else {
+      reasoningBtn.classList.add("hidden");
+    }
+  }
+
+  // Clean up and hide buttons
+  delete element.dataset.aiSuggested;
+  delete element.dataset.previousValue;
+  if (contextTextarea) delete contextTextarea.dataset.previousContext;
+  if (reasoningBtn) {
+    delete reasoningBtn.dataset.previousReasoningText;
+    delete reasoningBtn.dataset.wasVisible;
+  }
+
+  const clearBtn = document.querySelector(
+    `.clear-ai-btn[data-clear-target="${fieldId}"]`
+  );
+  const revertBtn = document.querySelector(
+    `.revert-ai-btn[data-revert-target="${fieldId}"]`
+  );
+  if (clearBtn) clearBtn.classList.add("hidden");
+  if (revertBtn) revertBtn.classList.add("hidden");
+}
+
 export function resetForm() {
   if (dom.annotationForm) {
-    // Reset standard form elements like selects
     dom.annotationForm.reset();
     dom.annotationForm.querySelectorAll("select").forEach((el) => {
       el.dispatchEvent(new Event("change"));
     });
 
-    // Manually reset the new boolean button groups
     dom.annotationForm
       .querySelectorAll(".boolean-button-group")
       .forEach((group) => {
@@ -235,7 +357,6 @@ export function resetForm() {
         }
       });
 
-    // Manually reset all locks
     dom.annotationForm
       .querySelectorAll("[data-locked='true']")
       .forEach((el) => {
@@ -252,10 +373,26 @@ export function resetForm() {
   document
     .querySelectorAll(".field-missing")
     .forEach((el) => el.classList.remove("field-missing"));
-  document.querySelectorAll(".reasoning-bubble-btn").forEach((btn) => {
-    btn.classList.add("hidden");
-    btn.dataset.reasoningText = "";
-  });
+
+  // --- Clean up all AI-related state ---
+  document
+    .querySelectorAll(".reasoning-bubble-btn, .clear-ai-btn, .revert-ai-btn")
+    .forEach((btn) => {
+      btn.classList.add("hidden");
+      btn.dataset.reasoningText = "";
+    });
+
+  if (dom.annotationForm) {
+    dom.annotationForm.querySelectorAll("[data-ai-suggested]").forEach((el) => {
+      delete el.dataset.aiSuggested;
+      delete el.dataset.previousValue;
+    });
+    dom.annotationForm
+      .querySelectorAll("[data-previous-context]")
+      .forEach((el) => {
+        delete el.dataset.previousContext;
+      });
+  }
 }
 
 export function setupContextToggles() {
@@ -264,12 +401,37 @@ export function setupContextToggles() {
       const targetId = event.target.dataset.contextTarget;
       const contextBox = document.getElementById(targetId);
       if (contextBox) {
-        // Show if the value is 'true' for booleans, or any non-empty value for selects
-        let shouldShow = event.target.value === "true";
+        let shouldShow;
+        // For select elements, show if any option other than the placeholder is selected.
+        if (event.target.tagName === "SELECT") {
+          shouldShow = event.target.value !== "";
+        } else {
+          // For boolean buttons (which use a hidden input), show only if the value is 'true'.
+          shouldShow = event.target.value === "true";
+        }
         contextBox.classList.toggle("hidden", !shouldShow);
       }
     });
   });
+}
+
+export function setupFieldActionControls() {
+  const container = document.getElementById("annotation-fields-container");
+  if (container) {
+    container.addEventListener("click", (event) => {
+      const clearBtn = event.target.closest(".clear-ai-btn");
+      if (clearBtn && clearBtn.dataset.clearTarget) {
+        clearAISuggestion(clearBtn.dataset.clearTarget);
+        return;
+      }
+
+      const revertBtn = event.target.closest(".revert-ai-btn");
+      if (revertBtn && revertBtn.dataset.revertTarget) {
+        revertAIField(revertBtn.dataset.revertTarget);
+        return;
+      }
+    });
+  }
 }
 
 async function loadPdf(paper) {
@@ -357,7 +519,6 @@ export async function renderPaper(paper) {
   dom.pdfViewerContainer.classList.remove("hidden");
   await loadPdf(paper);
 
-  // Reset the form first to clear any previous state
   resetForm();
 
   if (paper.existing_annotation) {

@@ -315,28 +315,53 @@ select option {
         top: 2rem;
         max-height: calc(100vh - 4rem);
         overflow-y: auto;
+        /* FIX: Add padding to prevent scrollbar thumb from overlapping rounded corners */
+        padding-top: 1rem;
+        padding-bottom: 1rem;
     }
 }
 
-.paper-content::-webkit-scrollbar, .annotation-panel::-webkit-scrollbar {
+/* --- CUSTOM SCROLLBARS --- */
+
+/* 1. Set the width for all custom scrollbars */
+.paper-content::-webkit-scrollbar,
+#annotation-view::-webkit-scrollbar,
+.annotation-panel::-webkit-scrollbar,
+textarea::-webkit-scrollbar {
     width: 12px;
 }
 
-.paper-content::-webkit-scrollbar-track, .annotation-panel::-webkit-scrollbar-track {
+/* 2. Style the track (the background). Make it transparent for the main panel. */
+.paper-content::-webkit-scrollbar-track,
+textarea::-webkit-scrollbar-track {
     background: rgba(0,0,0,0.1);
     border-radius: 10px;
 }
 
-.paper-content::-webkit-scrollbar-thumb, .annotation-panel::-webkit-scrollbar-thumb {
+#annotation-view::-webkit-scrollbar-track,
+.annotation-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* 3. Style the thumb (the draggable part) consistently for all */
+.paper-content::-webkit-scrollbar-thumb,
+#annotation-view::-webkit-scrollbar-thumb,
+.annotation-panel::-webkit-scrollbar-thumb,
+textarea::-webkit-scrollbar-thumb {
     background: rgba(255,255,255,0.4);
     border-radius: 10px;
     border: 3px solid transparent;
     background-clip: content-box;
 }
 
-.paper-content::-webkit-scrollbar-thumb:hover, .annotation-panel::-webkit-scrollbar-thumb:hover {
+/* 4. Style the thumb on hover consistently for all */
+.paper-content::-webkit-scrollbar-thumb:hover,
+#annotation-view::-webkit-scrollbar-thumb:hover,
+.annotation-panel::-webkit-scrollbar-thumb:hover,
+textarea::-webkit-scrollbar-thumb:hover {
     background: rgba(255,255,255,0.6);
 }
+
 
 /* --- Resizable Panel Styles --- */
 #main-content-grid {
@@ -747,4 +772,35 @@ html.theme-forest textarea {
 
 html.theme-cyberpunk .nav-btn.active-nav .header-icon {
     filter: drop-shadow(0 0 5px var(--accent-color));
+}
+
+.ai-action-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease-in-out;
+}
+
+.ai-action-btn svg {
+    width: 18px;
+    height: 18px;
+    stroke: var(--text-secondary);
+    transition: all 0.2s ease-in-out;
+}
+
+.ai-action-btn:hover svg {
+    stroke: var(--text-primary);
+}
+
+.revert-ai-btn:hover svg {
+    stroke: #FBBF24; /* Yellow */
+}
+
+.clear-ai-btn:hover svg {
+    stroke: #F87171; /* Red */
 }
