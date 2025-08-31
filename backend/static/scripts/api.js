@@ -379,6 +379,47 @@ export async function triggerUpdateAndRestart() {
   }
 }
 
+// --- Filter Management ---
+
+export async function setFilter(dataset, query, template) {
+  const response = await fetch(`${API_BASE_URL}/api/filter/set`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataset, query, template }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || "Failed to set filter.");
+  }
+  return response.json();
+}
+
+export async function clearFilter(dataset) {
+  const response = await fetch(`${API_BASE_URL}/api/filter/clear`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataset }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || "Failed to clear filter.");
+  }
+  return response.json();
+}
+
+export async function getFilterStatus(dataset) {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/filter/status?dataset=${dataset}`
+    );
+    if (!response.ok) return { is_active: false };
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to get filter status:", error);
+    return { is_active: false };
+  }
+}
+
 // --- Application Status ---
 export async function getAppStatus() {
   try {

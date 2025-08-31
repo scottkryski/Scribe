@@ -321,6 +321,16 @@ select option {
     }
 }
 
+@media (max-width: 1280px) {
+    #filter-wrapper {
+        width: 180px; /* Smaller width on smaller screens */
+    }
+    
+    .custom-select {
+        max-width: 150px; /* Reduce select width when space is tight */
+    }
+}
+
 /* --- CUSTOM SCROLLBARS --- */
 
 /* 1. Set the width for all custom scrollbars */
@@ -803,4 +813,78 @@ html.theme-cyberpunk .nav-btn.active-nav .header-icon {
 
 .clear-ai-btn:hover svg {
     stroke: #F87171; /* Red */
+}
+
+/* --- MODIFIED: Filter Controls --- */
+#filter-wrapper {
+    position: relative;
+    height: 40px; /* Match the height of the select boxes */
+}
+
+#filter-controls, #filter-status-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+#filter-controls {
+    display: flex;
+    align-items: center;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 9999px; /* pill shape */
+    transition: all 0.3s ease;
+    overflow: hidden; /* Important for pill shape */
+    width: 220px; /* Give it a default width */
+}
+
+#filter-controls:focus-within {
+    box-shadow: 0 0 0 2px var(--accent-color);
+}
+
+#filter-input {
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    flex-grow: 1; /* Allow input to take available space */
+    min-width: 100px;
+}
+
+#apply-filter-btn {
+    border-radius: 0 9999px 9999px 0;
+    padding: 0.5rem 1rem;
+    border-left: 1px solid var(--glass-border);
+    height: 100%;
+    flex-shrink: 0;
+}
+
+#apply-filter-btn:hover {
+    transform: none;
+}
+
+#filter-status-container {
+    background-color: rgba(76, 29, 149, 0.4); /* purple-900 with opacity */
+    border: 1px solid rgba(139, 92, 246, 0.5);
+    border-radius: 9999px;
+    padding-left: 1rem;
+    padding-right: 0.5rem;
+    justify-content: space-between;
+    width: 220px;
+}
+
+#clear-filter-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    line-height: 1;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 0 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }

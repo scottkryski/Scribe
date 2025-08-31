@@ -40,6 +40,7 @@ document.addEventListener("DOMContentLoaded", () => {
     activeHighlightIds: new Set(),
     lockTimerInterval: null,
     isAppInitialized: false,
+    currentFilterQuery: "",
   };
 
   const mainContentGrid = document.getElementById("main-content-grid");
@@ -54,6 +55,14 @@ document.addEventListener("DOMContentLoaded", () => {
     "update-notification-banner"
   );
   const updateNowBannerBtn = document.getElementById("update-now-banner-btn");
+  const filterControls = document.getElementById("filter-controls");
+  const filterInput = document.getElementById("filter-input");
+  const applyFilterBtn = document.getElementById("apply-filter-btn");
+  const filterStatusContainer = document.getElementById(
+    "filter-status-container"
+  );
+  const filterStatusText = document.getElementById("filter-status-text");
+  const clearFilterBtn = document.getElementById("clear-filter-btn");
 
   async function runStartupUpdateCheck() {
     try {
@@ -262,9 +271,78 @@ document.addEventListener("DOMContentLoaded", () => {
     initializeAutoFill(template);
   }
 
+  function updateFilterStatusUI(status) {
+    if (status && status.is_active) {
+      filterControls.classList.add("hidden");
+      filterStatusContainer.classList.remove("hidden");
+      filterStatusText.textContent = `Filtered by "${status.query}" (${status.match_count} found)`;
+      state.currentFilterQuery = status.query;
+    } else {
+      filterControls.classList.remove("hidden");
+      filterStatusContainer.classList.add("hidden");
+      filterInput.value = "";
+      filterStatusText.textContent = "";
+      state.currentFilterQuery = "";
+    }
+  }
+
+  async function handleApplyFilter() {
+    const query = filterInput.value.trim();
+    if (!query || !state.currentDataset) {
+      ui.showToastNotification("Please enter a filter query.", "warning");
+      return;
+    }
+
+    ui.showLoading("Applying Filter", `Searching for "${query}"...`);
+    try {
+      const result = await api.setFilter(state.currentDataset, query);
+      updateFilterStatusUI({
+        is_active: true,
+        query: result.query,
+        match_count: result.match_count,
+      });
+      if (result.match_count > 0) {
+        ui.showToastNotification(
+          `Filter applied. Found ${result.match_count} papers.`,
+          "success"
+        );
+        await fetchAndDisplayNextPaper();
+      } else {
+        ui.hideLoading();
+        ui.showToastNotification("Your filter returned 0 results.", "warning");
+        // Clear the paper view since no papers can be shown
+        dom.paperView.classList.remove("hidden");
+        dom.paperTitle.textContent =
+          "Filter returned 0 results. Please clear the filter or try a different term.";
+        dom.paperContentContainer.classList.add("hidden");
+        dom.annotationView.classList.add("hidden");
+        resizeHandle.style.display = "none";
+      }
+    } catch (error) {
+      ui.hideLoading();
+      alert(`Error applying filter: ${error.message}`);
+    }
+  }
+
+  async function handleClearFilter() {
+    if (!state.currentDataset) return;
+
+    ui.showLoading("Clearing Filter", "Reloading dataset queue...");
+    try {
+      await api.clearFilter(state.currentDataset);
+      updateFilterStatusUI({ is_active: false });
+      ui.showToastNotification("Filter cleared.", "success");
+      await fetchAndDisplayNextPaper();
+    } catch (error) {
+      ui.hideLoading();
+      alert(`Error clearing filter: ${error.message}`);
+    }
+  }
+
   async function handleDatasetChange() {
     const selectedDataset = dom.datasetSelector.value;
     if (!selectedDataset || !state.currentSheetId) {
+      updateFilterStatusUI({ is_active: false });
       return;
     }
     state.currentDataset = selectedDataset;
@@ -272,6 +350,10 @@ document.addEventListener("DOMContentLoaded", () => {
       `currentDataset_${state.currentSheetId}`,
       selectedDataset
     );
+
+    const filterStatus = await api.getFilterStatus(selectedDataset);
+    updateFilterStatusUI(filterStatus);
+
     ui.showLoading("Loading Session", "Checking for resumable papers...");
     try {
       const annotatorName = localStorage.getItem("annotatorName");
@@ -319,6 +401,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function handleSheetChange() {
     const selectedSheetId = dom.sheetSelector.value;
+    updateFilterStatusUI({ is_active: false });
     if (!selectedSheetId) {
       dom.datasetSelector.disabled = true;
       dom.datasetSelector.innerHTML =
@@ -1224,6 +1307,17 @@ document.addEventListener("DOMContentLoaded", () => {
     dom.submitBtn.addEventListener("click", submitAnnotation);
     dom.skipBtn.addEventListener("click", handleSkip);
     dom.getSuggestionsBtn.addEventListener("click", handleGetSuggestions);
+
+    // --- NEW: Filter Event Listeners ---
+    applyFilterBtn.addEventListener("click", handleApplyFilter);
+    clearFilterBtn.addEventListener("click", handleClearFilter);
+    filterInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleApplyFilter();
+      }
+    });
+
     dom.annotationFieldsContainer.addEventListener("click", (event) => {
       const lockBtn = event.target.closest(".autofill-lock-btn");
       if (lockBtn) {

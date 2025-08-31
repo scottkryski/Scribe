@@ -222,3 +222,38 @@ def get_paper_by_doi_from_file(dataset_path: Path, doi: str) -> dict | None:
     except (IOError, json.JSONDecodeError, UnicodeDecodeError) as e:
         print(f"ERROR: Could not retrieve paper '{doi}' from file at offset {offset}: {e}")
         return None
+
+def search_papers_by_keyword(dataset_name: str, query: str) -> list[str]:
+    """
+    Performs a full-text search on the dataset and returns a list of matching DOIs.
+    """
+    db_path = get_db_path(dataset_name)
+    if not db_path.exists():
+        print(f"WARN: Cannot search, database for '{dataset_name}' does not exist.")
+        return []
+
+    dois = []
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Use FTS5 MATCH syntax. The query will be sanitized by the parameter binding.
+        cursor.execute(
+            "SELECT doi FROM paper_text_fts WHERE paper_text_fts MATCH ?",
+            (query,)
+        )
+        
+        results = cursor.fetchall()
+        dois = [row[0] for row in results]
+        print(f"LOG: FTS5 search for '{query}' in '{dataset_name}' found {len(dois)} results.")
+        
+    except sqlite3.Error as e:
+        print(f"ERROR: FTS5 search failed for '{dataset_name}': {e}")
+        # This can happen if the FTS5 query syntax is invalid.
+        # We can return an empty list to prevent a crash.
+        return []
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
+            
+    return dois

@@ -23,7 +23,7 @@ import asyncio
 
 from ai_requests import get_gemini_response, get_gemini_models, configure_genai
 # --- NEW: Import database functions ---
-from database import index_dataset_if_needed, get_papers_index, get_paper_by_doi_from_file
+from database import index_dataset_if_needed, get_papers_index, get_paper_by_doi_from_file, search_papers_by_keyword
 
 # --- PYINSTALLER CHANGE: Helper function to find bundled files ---
 def resource_path(relative_path):
@@ -96,6 +96,9 @@ ANNOTATED_ITEMS: Set[str] = set()
 INCOMPLETE_ANNOTATIONS: Dict[str, dict] = {}
 gspread_client: Optional[gspread.Client] = None
 worksheet: Optional[gspread.Worksheet] = None
+# --- NEW: State for active filters ---
+# Structure: { "dataset_name": {"query": "search term", "dois": ["10.xxxx", ...]} }
+ACTIVE_FILTERS: Dict[str, Dict[str, Any]] = {}
 
 class AnnotationSubmission(BaseModel):
     doi: str
@@ -125,6 +128,12 @@ class GeminiRequest(BaseModel):
     pdf_filename: str
     model_name: str
     template: Dict[str, Any]
+
+# --- MODIFIED: Pydantic model for filter requests ---
+class FilterRequest(BaseModel):
+    dataset: str
+    query: str
+    template: Optional[Dict[str, Any]] = None
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/pdfs", StaticFiles(directory=PDF_DIR), name="pdfs")
@@ -373,12 +382,84 @@ async def get_gemini_suggestions(request: GeminiRequest):
         raise HTTPException(status_code=500, detail=f"An error occurred while communicating with the AI model: {e}")
 
 
+# --- MODIFIED: Filter Management API Endpoints ---
+
+@app.post("/api/filter/set")
+def set_filter(request: FilterRequest):
+    """Sets or updates a keyword filter for a given dataset, using template keywords if possible."""
+    dataset_name = request.dataset
+    user_query = request.query.strip()
+    template = request.template
+    
+    if dataset_name not in AVAILABLE_DATASETS:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_name}' not found.")
+    
+    if not user_query:
+        if dataset_name in ACTIVE_FILTERS:
+            del ACTIVE_FILTERS[dataset_name]
+        return {"status": "cleared", "message": "Filter cleared due to empty query.", "match_count": 0}
+
+    # --- NEW: Smart Query Construction ---
+    final_fts_query = user_query  # Default to user's raw query
+    filter_reason = f"user query: '{user_query}'"
+
+    if template and template.get("fields"):
+        normalized_user_query = user_query.lower().strip()
+        for field in template["fields"]:
+            field_label = field.get("label", "").lower()
+            if normalized_user_query in field_label:
+                keywords = field.get("keywords")
+                if keywords and isinstance(keywords, list) and len(keywords) > 0:
+                    # Construct an FTS5 OR query: "keyword1" OR "keyword2"
+                    final_fts_query = " OR ".join(f'"{keyword}"' for keyword in keywords)
+                    filter_reason = f"matched template field '{field.get('label')}'"
+                    break  # Use the first match
+
+    print(f"LOG: Setting filter for '{dataset_name}'. Reason: {filter_reason}. FTS Query: '{final_fts_query}'")
+    matching_dois = search_papers_by_keyword(dataset_name, final_fts_query)
+    
+    ACTIVE_FILTERS[dataset_name] = {
+        "query": user_query,  # Store the original user query for display
+        "dois": matching_dois
+    }
+    
+    return {"status": "success", "match_count": len(matching_dois), "query": user_query}
+
+
+@app.post("/api/filter/clear")
+def clear_filter(request: LoadRequest): # Reusing LoadRequest as it just needs the dataset name
+    """Clears the active filter for a given dataset."""
+    dataset_name = request.dataset
+    if dataset_name in ACTIVE_FILTERS:
+        del ACTIVE_FILTERS[dataset_name]
+        print(f"LOG: Cleared filter for dataset '{dataset_name}'.")
+        return {"status": "success", "message": "Filter cleared."}
+    return {"status": "noop", "message": "No active filter to clear."}
+
+@app.get("/api/filter/status")
+def get_filter_status(dataset: str):
+    """Gets the status of the current filter for a dataset."""
+    if dataset in ACTIVE_FILTERS:
+        filter_data = ACTIVE_FILTERS[dataset]
+        return {
+            "is_active": True,
+            "query": filter_data["query"],
+            "match_count": len(filter_data["dois"])
+        }
+    return {"is_active": False}
+
+
 # --- MODIFIED: /load-dataset endpoint ---
 @app.post("/load-dataset")
 def load_dataset(request: LoadRequest):
     dataset_name = request.dataset
     if dataset_name not in AVAILABLE_DATASETS:
         raise HTTPException(status_code=404, detail=f"Dataset file '{dataset_name}' not found on server.")
+
+    # --- NEW: Clear any existing filter when a dataset is explicitly loaded/reloaded ---
+    if dataset_name in ACTIVE_FILTERS:
+        del ACTIVE_FILTERS[dataset_name]
+        print(f"LOG: Cleared active filter for '{dataset_name}' on dataset load.")
 
     print(f"LOG: Loading dataset '{dataset_name}' from index. Prioritize incomplete: {request.prioritize_incomplete}")
     
@@ -547,6 +628,10 @@ def get_datasets():
     for name in list(AVAILABLE_DATASETS.keys()):
         if name not in current_datasets:
             del AVAILABLE_DATASETS[name]
+            # --- NEW: Also remove any active filter for the deleted dataset ---
+            if name in ACTIVE_FILTERS:
+                del ACTIVE_FILTERS[name]
+                print(f"LOG: Cleared active filter for deleted dataset '{name}'.")
 
     return sorted(list(AVAILABLE_DATASETS.keys()))
 
@@ -681,6 +766,15 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
 
         print(f"LOG: Total unavailable DOIs (completed or locked by others): {len(unavailable_dois)}")
 
+        # --- NEW: Check for an active filter ---
+        active_filter_dois = None
+        if dataset in ACTIVE_FILTERS and ACTIVE_FILTERS[dataset]["dois"]:
+            active_filter_dois = set(ACTIVE_FILTERS[dataset]["dois"])
+            print(f"LOG: Applying active filter with {len(active_filter_dois)} DOIs.")
+        elif dataset in ACTIVE_FILTERS: # Filter is active but returned 0 results
+            print("ERROR-LOG: Active filter has 0 matches. No papers can be returned.")
+            raise HTTPException(status_code=404, detail="The active filter returned 0 matching papers.")
+
         print("LOG: Searching queue for the next available and valid paper...")
         candidate_paper_info = None
         
@@ -690,6 +784,10 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
         for paper_info in papers_to_check:
             doi = paper_info.get('doi')
             if doi in unavailable_dois:
+                continue
+
+            # --- NEW: Apply filter condition ---
+            if active_filter_dois and doi not in active_filter_dois:
                 continue
 
             if pdf_required:
@@ -702,8 +800,13 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
             break
 
         if not candidate_paper_info:
-            print("ERROR-LOG: No available papers with valid PDFs found in the queue after checking all items.")
-            raise HTTPException(status_code=404, detail="No available papers with valid PDFs found in the queue.")
+            # --- NEW: More specific message if a filter is active ---
+            if active_filter_dois:
+                print("ERROR-LOG: No available papers found in the queue that match the active filter.")
+                raise HTTPException(status_code=404, detail="No available papers in the queue match the current filter.")
+            else:
+                print("ERROR-LOG: No available papers with valid PDFs found in the queue after checking all items.")
+                raise HTTPException(status_code=404, detail="No available papers with valid PDFs found in the queue.")
 
         candidate_doi = candidate_paper_info.get('doi')
         
