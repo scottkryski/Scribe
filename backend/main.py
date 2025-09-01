@@ -68,15 +68,22 @@ def get_local_git_hash():
 # --- Configuration ---
 LOCK_TIMEOUT_SECONDS = 7200  # 2 hours
 
-# User-managed directories, relative to the executable's location
+# --- NEW: Define script's parent directory for robust pathing ---
+_SCRIPT_DIR = Path(__file__).resolve().parent
+
+# User-managed directories, created relative to where the app is run
 DATA_DIR = Path("data")
 PDF_DIR = Path("pdfs")
-TEMPLATES_DIR = Path("templates")
+TEMPLATES_DIR = Path("templates") # This is the user-facing directory
 SHEETS_CONFIG_FILE = DATA_DIR / "sheets_config.json"
-# Bundled resources that PyInstaller will include with the app. Disabled for now
+
+# Bundled resources that PyInstaller will include with the app.
 STATIC_DIR = resource_path("static")
 CREDS_FILE = resource_path("credentials.json")
-DEFAULT_TEMPLATE_FILE = resource_path("templates/default.json")
+
+# The SOURCE for the default template file, located at the project root.
+# We build an absolute path from the script's location to find it.
+DEFAULT_TEMPLATE_FILE = _SCRIPT_DIR.parent / "templates" / "default.json"
 
 
 # --- App Setup ---

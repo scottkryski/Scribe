@@ -1,17 +1,18 @@
 // scripts/highlighting.js
 import * as dom from "./domElements.js";
 
-// Moved from keywordMap.js
-export const HIGHLIGHT_COLORS = {
-  "highlight-experimental": "#FBBF24",
-  "highlight-humans": "#A7F3D0",
-  "highlight-animals": "#FBCFE8",
-  "highlight-sensitive-data": "#FECACA",
-  "highlight-ethics-declaration": "#BFDBFE",
-  "highlight-consent": "#C4B5FD",
-  "highlight-coi": "#FDBA74",
-  "highlight-data-protection": "#A5F3FC",
-};
+// A beautiful, high-contrast color palette for cycling through highlights.
+// Each object contains a background color for the <mark> tag and a stroke color for the SVG icon.
+export const HIGHLIGHT_COLOR_PALETTE = [
+  { bg: "#FBBF24", stroke: "#FBBF24" }, // Amber
+  { bg: "#A7F3D0", stroke: "#A7F3D0" }, // Mint
+  { bg: "#FBCFE8", stroke: "#FBCFE8" }, // Pink
+  { bg: "#BFDBFE", stroke: "#BFDBFE" }, // Blue
+  { bg: "#FDBA74", stroke: "#FDBA74" }, // Orange
+  { bg: "#C4B5FD", stroke: "#C4B5FD" }, // Violet
+  { bg: "#A5F3FC", stroke: "#A5F3FC" }, // Cyan
+  { bg: "#FECACA", stroke: "#FECACA" }, // Red
+];
 
 function countKeywords(text, keywords) {
   if (!text || !keywords || keywords.length === 0) return 0;
@@ -73,24 +74,24 @@ export function updateAllHighlights(
   let abstractHTML = originalAbstractHTML;
   let fullTextHTML = originalFullTextHTML;
 
-  if (!activeTemplate) return;
-
-  const colors = Object.values(HIGHLIGHT_COLORS);
-  let colorIndex = 0;
+  if (!activeTemplate || !activeTemplate.fields) return;
 
   activeHighlightIds.forEach((triggerId) => {
     const field = activeTemplate.fields.find((f) => f.id === triggerId);
-    if (field && field.keywords && field.keywords.length > 0) {
-      const colorClass = `highlight-${field.id.replace(/_/g, "-")}`;
+    // Find the index of the field to get a consistent color from the palette
+    const fieldIndex = activeTemplate.fields.findIndex(
+      (f) => f.id === triggerId
+    );
 
-      // Use predefined color if it exists, otherwise cycle.
-      let highlightColor;
-      if (HIGHLIGHT_COLORS[colorClass]) {
-        highlightColor = HIGHLIGHT_COLORS[colorClass];
-      } else {
-        highlightColor = colors[colorIndex % colors.length];
-        colorIndex++; // Only increment for cycled colors to maintain consistency
-      }
+    if (
+      field &&
+      field.keywords &&
+      field.keywords.length > 0 &&
+      fieldIndex !== -1
+    ) {
+      // Cycle through the color palette based on the field's position in the template
+      const color =
+        HIGHLIGHT_COLOR_PALETTE[fieldIndex % HIGHLIGHT_COLOR_PALETTE.length];
 
       const regex = new RegExp(
         `\\b(${field.keywords
@@ -102,12 +103,12 @@ export function updateAllHighlights(
       abstractHTML = abstractHTML.replace(
         regex,
         (match) =>
-          `<mark class="highlight" style="background-color:${highlightColor}; color: #000;">${match}</mark>`
+          `<mark class="highlight" style="background-color:${color.bg};">${match}</mark>`
       );
       fullTextHTML = fullTextHTML.replace(
         regex,
         (match) =>
-          `<mark class="highlight" style="background-color:${highlightColor}; color: #000;">${match}</mark>`
+          `<mark class="highlight" style="background-color:${color.bg};">${match}</mark>`
       );
     }
   });
@@ -120,46 +121,40 @@ export function updateAllHighlights(
 
 export function updateScrollGlows(activeHighlightIds) {
   if (activeHighlightIds.size === 0) {
-    dom.scrollTopGlow.classList.remove("visible");
-    dom.scrollBottomGlow.classList.remove("visible");
+    dom.scrollTopGlow.style.opacity = 0;
+    dom.scrollBottomGlow.style.opacity = 0;
     return;
   }
-
   const marks = Array.from(
     dom.paperContentContainer.querySelectorAll(".highlight")
   );
   if (marks.length === 0) {
-    dom.scrollTopGlow.classList.remove("visible");
-    dom.scrollBottomGlow.classList.remove("visible");
+    dom.scrollTopGlow.style.opacity = 0;
+    dom.scrollBottomGlow.style.opacity = 0;
     return;
   }
 
-  const { scrollTop, clientHeight } = dom.paperContentContainer;
-  const firstMarkAbove = marks.find(
-    (mark) => mark.offsetTop + mark.offsetHeight < scrollTop
-  );
+  const { scrollTop, clientHeight, scrollHeight } = dom.paperContentContainer;
+  const firstMarkAbove = marks.find((mark) => mark.offsetTop < scrollTop);
   const firstMarkBelow = marks.find(
     (mark) => mark.offsetTop > scrollTop + clientHeight
   );
 
-  const getColor = (element) => {
-    // Since we are using inline styles now, get it from there
-    return element.style.backgroundColor;
-  };
+  const getColor = (element) => element.style.backgroundColor;
 
-  const topColor = firstMarkAbove ? getColor(firstMarkAbove) : null;
-  if (topColor) {
-    dom.scrollTopGlow.style.background = `linear-gradient(to bottom, ${topColor}99, transparent)`;
-    dom.scrollTopGlow.classList.add("visible");
+  if (firstMarkAbove) {
+    const topColor = getColor(firstMarkAbove);
+    dom.scrollTopGlow.style.background = `radial-gradient(circle at 50% 0, ${topColor} 0%, transparent 70%)`;
+    dom.scrollTopGlow.style.opacity = 1;
   } else {
-    dom.scrollTopGlow.classList.remove("visible");
+    dom.scrollTopGlow.style.opacity = 0;
   }
 
-  const bottomColor = firstMarkBelow ? getColor(firstMarkBelow) : null;
-  if (bottomColor) {
-    dom.scrollBottomGlow.style.background = `linear-gradient(to top, ${bottomColor}99, transparent)`;
-    dom.scrollBottomGlow.classList.add("visible");
+  if (firstMarkBelow) {
+    const bottomColor = getColor(firstMarkBelow);
+    dom.scrollBottomGlow.style.background = `radial-gradient(circle at 50% 100%, ${bottomColor} 0%, transparent 70%)`;
+    dom.scrollBottomGlow.style.opacity = 1;
   } else {
-    dom.scrollBottomGlow.classList.remove("visible");
+    dom.scrollBottomGlow.style.opacity = 0;
   }
 }
