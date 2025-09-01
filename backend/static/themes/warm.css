@@ -1,0 +1,54 @@
+/* static/themes/warm.css */
+
+html.theme-warm {
+    --bg-gradient: #F5F1E8; /* Cream background */
+    --bg-glow-1: rgba(232, 169, 76, 0.2); /* Ochre glow */
+    --bg-glow-2: rgba(77, 46, 26, 0.1); /* Brown glow */
+    --bg-glow-3: transparent;
+    --text-primary: #4D2E1A; /* Dark Brown */
+    --text-secondary: #795548; /* Readable mid-brown */
+    --glass-bg: rgba(77, 46, 26, 0.05);
+    --glass-border: rgba(77, 46, 26, 0.3);
+    --glass-hover-bg: rgba(77, 46, 26, 0.1);
+    --accent-color: #E8A94C; /* Ochre */
+    --accent-color-strong: #D99B3D; /* Darker Ochre */
+    --select-arrow-color: '%234D2E1A'; /* Dark Brown, URL encoded */
+    --btn-text-color: #4D2E1A;
+}
+
+/* --- WARM THEME OVERRIDES --- */
+html.theme-warm .text-white {
+    color: var(--text-primary) !important;
+}
+
+html.theme-warm .text-gray-200,
+html.theme-warm .text-gray-300,
+html.theme-warm .text-gray-400 {
+    color: var(--text-secondary) !important;
+}
+
+html.theme-warm .text-purple-400,
+html.theme-warm .text-blue-400,
+html.theme-warm .text-pink-400 {
+    color: var(--text-primary) !important;
+}
+
+html.theme-warm .header-icon {
+    stroke: var(--text-primary);
+    filter: drop-shadow(1px 1px 1px rgba(77, 46, 26, 0.3));
+}
+
+html.theme-warm #submit-btn,
+html.theme-warm #skip-btn,
+html.theme-warm #get-suggestions-btn {
+    background-image: none;
+    background-color: var(--accent-color);
+    color: var(--btn-text-color);
+    border: 1px solid var(--glass-border);
+}
+
+html.theme-warm input,
+html.theme-warm select,
+html.theme-warm textarea {
+    border: 1px solid var(--glass-border);
+}

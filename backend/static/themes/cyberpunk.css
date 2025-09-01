@@ -1,0 +1,47 @@
+/* static/themes/cyberpunk.css */
+
+html.theme-cyberpunk {
+    --bg-gradient: linear-gradient(135deg, #000000 0%, #1a0a3a 50%, #0d021f 100%);
+    --bg-glow-1: rgba(255, 0, 255, 0.3); /* Magenta */
+    --bg-glow-2: rgba(0, 255, 255, 0.3); /* Cyan */
+    --bg-glow-3: rgba(255, 255, 0, 0.1); /* Yellow */
+    --text-primary: #ffffff;
+    --text-secondary: #00ffff;
+    --glass-bg: rgba(0, 255, 255, 0.05);
+    --glass-border: rgba(255, 0, 255, 0.3);
+    --glass-hover-bg: rgba(0, 255, 255, 0.1);
+    --accent-color: #ff00ff; /* Magenta */
+    --accent-color-strong: #e600e6;
+    --select-arrow-color: '%23ff00ff';
+    --btn-text-color: #000000;
+}
+
+/* --- CYBERPUNK THEME OVERRIDES --- */
+html.theme-cyberpunk .text-gray-200,
+html.theme-cyberpunk .text-gray-300,
+html.theme-cyberpunk .text-gray-400 {
+    color: var(--text-secondary) !important;
+}
+
+html.theme-cyberpunk #submit-btn,
+html.theme-cyberpunk #skip-btn,
+html.theme-cyberpunk #get-suggestions-btn {
+    background-image: none;
+    background-color: var(--accent-color);
+    color: var(--btn-text-color);
+    border: 1px solid var(--glass-border);
+    font-weight: 700;
+}
+
+html.theme-cyberpunk .header-icon {
+    stroke: var(--text-secondary);
+    filter: drop-shadow(0 0 5px var(--text-secondary));
+}
+
+html.theme-cyberpunk .logo-img {
+    filter: drop-shadow(0 0 8px var(--accent-color));
+}
+
+html.theme-cyberpunk .nav-btn.active-nav .header-icon {
+    filter: drop-shadow(0 0 5px var(--accent-color));
+}

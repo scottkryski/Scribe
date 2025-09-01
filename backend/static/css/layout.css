@@ -1,0 +1,77 @@
+/* static/layout.css */
+/* This file contains styles for the main page structure and layout containers. */
+.page-container {
+    max-width: 1280px;
+    transition: max-width 0.2s ease-in-out;
+}
+
+.page-container.widescreen {
+    max-width: 98%;
+}
+
+.paper-content, .annotation-panel {
+    flex-grow: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.paper-content {
+    max-height: calc(100vh - 250px);
+}
+
+@media (min-width: 1024px) {
+    .sticky-annotation {
+        position: sticky;
+        top: 2rem;
+        max-height: calc(100vh - 4rem);
+        overflow-y: auto;
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+    }
+}
+
+@media (max-width: 1280px) {
+    #filter-wrapper {
+        width: 180px;
+    }
+    .custom-select {
+        max-width: 150px;
+    }
+}
+
+/* --- Resizable Panel --- */
+#main-content-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+}
+
+@media (min-width: 1024px) {
+    #main-content-grid {
+        grid-template-columns: 3fr 1rem 2fr;
+        gap: 0;
+    }
+}
+
+.resizer {
+    width: 1rem;
+    cursor: col-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+}
+
+.resizer::after {
+    content: '';
+    display: block;
+    width: 4px;
+    height: 96px;
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.resizer:hover::after, .resizer.is-resizing::after {
+    background-color: rgba(255, 255, 255, 0.4);
+}

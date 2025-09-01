@@ -1,0 +1,54 @@
+/* static/highlighting.css */
+
+/* This file now only contains the generic styles for highlighting, not the specific colors. */
+
+
+/* --- Base Highlight Styles --- */
+.highlight {
+    padding: 2px 1px;
+    border-radius: 3px;
+    font-weight: 500;
+    color: #000; /* Default text color for highlights, can be overridden */
+}
+
+.annotation-row.field-missing {
+    border: 1px solid #ef4444 !important;
+    border-radius: 1rem !important;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3) !important;
+    background: rgba(239, 68, 68, 0.1) !important;
+    animation: pulse-red 2s infinite;
+}
+
+/* --- Highlight Toggle Button --- */
+.highlight-toggle-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease-in-out;
+}
+
+.highlight-toggle-btn svg {
+    width: 16px;
+    height: 16px;
+    stroke: var(--text-secondary);
+    transition: all 0.2s ease-in-out;
+}
+
+.highlight-toggle-btn:hover svg {
+    stroke: var(--text-primary);
+}
+
+.highlight-toggle-btn.active {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.highlight-toggle-btn.active svg {
+    transform: scale(1.1);
+}
+
+/* NOTE: The specific colors for active buttons are now generated dynamically by script.js */

@@ -1,0 +1,47 @@
+/* static/themes/forest.css */
+
+html.theme-forest {
+    --bg-gradient: linear-gradient(135deg, #1A2E20 0%, #2A402E 50%, #152218 100%);
+    --bg-glow-1: rgba(132, 204, 22, 0.15); /* Lime */
+    --bg-glow-2: rgba(251, 191, 36, 0.1); /* Amber */
+    --bg-glow-3: rgba(34, 197, 94, 0.1);  /* Green */
+    --text-primary: #f0fdf4;
+    --text-secondary: #a7f3d0;
+    --glass-bg: rgba(16, 185, 129, 0.1);
+    --glass-border: rgba(16, 185, 129, 0.2);
+    --glass-hover-bg: rgba(16, 185, 129, 0.15);
+    --accent-color: #34d399; /* Emerald */
+    --accent-color-strong: #10b981;
+    --select-arrow-color: '%23a7f3d0';
+    --btn-text-color: #0c2b1d;
+}
+
+/* --- FOREST THEME OVERRIDES --- */
+html.theme-forest .text-white {
+    color: var(--text-primary) !important;
+}
+
+html.theme-forest .text-gray-200,
+html.theme-forest .text-gray-300,
+html.theme-forest .text-gray-400 {
+    color: var(--text-secondary) !important;
+}
+
+html.theme-forest #submit-btn,
+html.theme-forest #skip-btn,
+html.theme-forest #get-suggestions-btn {
+    background-image: none;
+    background-color: var(--accent-color);
+    color: var(--btn-text-color);
+    border: 1px solid var(--glass-border);
+}
+
+html.theme-forest .header-icon {
+    stroke: var(--text-secondary);
+}
+
+html.theme-forest input,
+html.theme-forest select,
+html.theme-forest textarea {
+    border: 1px solid var(--glass-border);
+}

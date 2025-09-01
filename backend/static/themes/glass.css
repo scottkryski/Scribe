@@ -1,0 +1,17 @@
+/* static/themes/glass.css */
+
+html.theme-glass {
+    --bg-gradient: linear-gradient(135deg, #4a5568 0%, #2d3748 50%, #1a202c 100%);
+    --bg-glow-1: rgba(255, 255, 255, 0.1);
+    --bg-glow-2: rgba(255, 255, 255, 0.05);
+    --bg-glow-3: rgba(255, 255, 255, 0.08);
+    --text-primary: #FFFFFF;
+    --text-secondary: #a0aec0; /* gray-400 */
+    --glass-bg: rgba(255, 255, 255, 0.08);
+    --glass-border: rgba(255, 255, 255, 0.2);
+    --glass-hover-bg: rgba(255, 255, 255, 0.12);
+    --accent-color: #a0aec0; /* gray-400 */
+    --accent-color-strong: #718096; /* gray-500 */
+    --select-arrow-color: '%23FFFFFF'; /* White, URL encoded */
+    --btn-text-color: #FFFFFF;
+}
