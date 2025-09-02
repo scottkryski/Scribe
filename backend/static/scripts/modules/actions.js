@@ -1,3 +1,4 @@
+// frontend/static/scripts/modules/actions.js
 import * as dom from "../domElements.js";
 import * as api from "../api.js";
 import * as ui from "../ui.js";
@@ -78,7 +79,7 @@ async function displayPaper(paper) {
   const { originalAbstractHTML, originalFullTextHTML } = await ui.renderPaper(
     paper
   );
-  startLockTimer(paper.lock_info);
+  startLockTimer();
 
   state.originalAbstractHTML = originalAbstractHTML;
   state.originalFullTextHTML = originalFullTextHTML;
@@ -277,18 +278,17 @@ export function initializeActions(_state) {
         const annotatorName = localStorage.getItem("annotatorName");
         if (annotatorName) {
           const resumable = await api.checkForResumablePaper(annotatorName);
-          if (
-            resumable.resumable &&
-            confirm(`Resume working on "${resumable.title}"?`)
-          ) {
-            await api.loadDataset(resumable.dataset);
-            await fetchAndDisplaySpecificPaper(
-              resumable.doi,
-              resumable.dataset
-            );
-            return;
-          } else if (resumable.resumable) {
-            await api.skipPaper(resumable.dataset, resumable.doi);
+          if (resumable.resumable && resumable.dataset === selectedDataset) {
+            if (confirm(`Resume working on "${resumable.title}"?`)) {
+              await api.loadDataset(resumable.dataset);
+              await fetchAndDisplaySpecificPaper(
+                resumable.doi,
+                resumable.dataset
+              );
+              return;
+            } else {
+              await api.skipPaper(resumable.dataset, resumable.doi);
+            }
           }
         }
         await api.loadDataset(state.currentDataset);
@@ -361,11 +361,9 @@ export function initializeActions(_state) {
           const triggerId = e.target.id;
           const currentValue = e.target.value;
 
-          // First, reset any fields that might have been set by this trigger previously
           document
             .querySelectorAll(`[data-autofilled-by="${triggerId}"]`)
             .forEach((fieldToReset) => {
-              // Avoid resetting a field that another rule from the same trigger is about to set
               const isTargetOfAnotherRule = field.autoFillRules.some(
                 (rule) =>
                   rule.targetId === fieldToReset.id &&
@@ -376,7 +374,6 @@ export function initializeActions(_state) {
               }
             });
 
-          // Then, apply the new rules
           field.autoFillRules.forEach((rule) => {
             if (currentValue === rule.triggerValue.toString()) {
               applyAutoFillRule(rule, triggerId);

@@ -11,6 +11,7 @@ backend/pdfs/
 backend/credentials.json
 backend/templates/*
 !backend/templates/default.json
+backend/routers/__pycache__
 
 # Python virtual environment
 backend/venv/
