@@ -8,6 +8,7 @@ import { initializeActions } from "./scripts/modules/actions.js";
 import { initializeSettings } from "./scripts/modules/settings.js";
 import { initializeViewManager } from "./scripts/modules/viewManager.js";
 import { initializeLockTimer } from "./scripts/modules/lockTimer.js";
+import { initializeDashboard } from "./scripts/modules/dashboard.js";
 
 async function waitForServerReady() {
   return new Promise((resolve) => {
@@ -26,6 +27,26 @@ async function waitForServerReady() {
     }, 1500);
   });
 }
+
+// --- FIX START: New function to check for updates on startup ---
+async function checkForUpdatesOnLoad() {
+  try {
+    const updateStatus = await api.checkForUpdates();
+    if (updateStatus.update_available) {
+      const banner = document.getElementById("update-notification-banner");
+      if (banner) {
+        banner.classList.remove("hidden");
+      }
+      console.log("Update available:", updateStatus.message);
+    } else {
+      console.log("Scribe is up to date.");
+    }
+  } catch (error) {
+    // Fail silently, this is not a critical feature.
+    console.warn("Could not check for updates on startup:", error);
+  }
+}
+// --- FIX END ---
 
 document.addEventListener("DOMContentLoaded", () => {
   dom.init();
@@ -48,7 +69,21 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- Module Initialization ---
   const actions = initializeActions(state);
   initializeLockTimer(state);
-  const viewManager = initializeViewManager(state, actions);
+
+  // The viewManager needs a way to tell the dashboard to reload, and the dashboard needs a way to tell the viewManager to switch views.
+  // We pass a simplified object to the dashboard so it can call back to the viewManager.
+  // Then we pass the fully initialized dashboard to the viewManager.
+  let viewManager;
+  const dashboard = initializeDashboard(state, {
+    showAnnotationViewWithPaper: async (paper) => {
+      // This function will be called from the dashboard to switch views
+      if (viewManager) {
+        await viewManager.showAnnotationViewWithPaper(paper);
+      }
+    },
+  });
+  viewManager = initializeViewManager(state, actions, dashboard);
+
   const settings = initializeSettings(
     state,
     viewManager,
@@ -87,7 +122,16 @@ document.addEventListener("DOMContentLoaded", () => {
     template.fields.forEach((field) => {
       const row = document.createElement("div");
       row.className = "annotation-row glass-effect rounded-xl p-3";
-      const lockButtonHTML = `<button type="button" class="autofill-lock-btn" data-target-lock="${field.id}" title="Lock field to prevent auto-fill"><svg class="icon-unlocked h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H4.5a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg><svg class="icon-locked hidden h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H4.5a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg></button>`;
+
+      const lockButtonHTML = `<button type="button" class="autofill-lock-btn" data-target-lock="${field.id}" title="Lock field to prevent auto-fill">
+                                  <svg class="icon-unlocked h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                      <path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v3m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                  </svg>
+                                  <svg class="icon-locked hidden h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                  </svg>
+                              </button>`;
+
       const aiActionButtonsHTML = `<button type="button" class="ai-action-btn revert-ai-btn hidden" data-revert-target="${field.id}" title="Revert AI Suggestion"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button><button type="button" class="ai-action-btn clear-ai-btn hidden" data-clear-target="${field.id}" title="Clear AI Suggestion & Context"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>`;
       let controlHTML = "";
       if (field.type === "boolean") {
@@ -137,17 +181,20 @@ document.addEventListener("DOMContentLoaded", () => {
       state.activeHighlightIds,
       state.activeTemplate
     );
-    // --- THIS IS THE FIX ---
     highlighting.updateAllHighlights(
       state.activeHighlightIds,
-      state.originalAbstractHTML, // Correct order
-      state.originalFullTextHTML, // Correct order
+      state.originalAbstractHTML,
+      state.originalFullTextHTML,
       state.activeTemplate
     );
   }
 
   async function init() {
     await waitForServerReady();
+
+    // --- FIX: Call the update check function on startup ---
+    checkForUpdatesOnLoad();
+
     viewManager.setupPanelResizing();
     viewManager.setupViewSwitching();
     await settings.setupSettings();
@@ -176,7 +223,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     dom.openDataFolderBtnMain.addEventListener("click", api.openDataFolder);
 
-    // --- THIS IS THE FIX ---
     const updateNowBannerBtn = document.getElementById("update-now-banner-btn");
     if (updateNowBannerBtn) {
       updateNowBannerBtn.addEventListener("click", () => {

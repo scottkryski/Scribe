@@ -34,6 +34,11 @@ def load_dataset(request: LoadRequest):
         final_queue = (incomplete_queue + new_paper_queue) if request.prioritize_incomplete else random.sample(incomplete_queue + new_paper_queue, k=len(incomplete_queue) + len(new_paper_queue))
         
         state.DATASET_QUEUES[dataset_name] = final_queue
+        
+        # --- FIX: Set the current dataset in the global state ---
+        state.currentDataset = dataset_name
+        print(f"LOG: Set active dataset in state to: {dataset_name}")
+
         return {"status": "success", "dataset": dataset_name, "queued_count": len(final_queue), "total_in_file": total_in_file}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process dataset from index: {e}")

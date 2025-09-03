@@ -3,7 +3,7 @@ import asyncio
 import json
 import shutil
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -18,12 +18,28 @@ from config import (
 from app_state import state
 from ai_requests import configure_genai
 from database import index_dataset_if_needed
-from routers import ai, annotation, dataset, pdf, sheets, system, templates
+from routers import ai, annotation, dataset, pdf, sheets, system, templates, dashboard # Import dashboard
 
 # --- App Setup ---
 app = FastAPI(title="Scribe API")
 origins = ["null", "http://127.0.0.1:5500", "http://localhost:8080", "http://127.0.0.1:8000"]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# --- FIX: Final Corrected CSP Middleware ---
+@app.middleware("http")
+async def add_csp_header(request: Request, call_next):
+    response: Response = await call_next(request)
+    # This policy allows everything needed for the UI to function: Tailwind, Google Fonts, Tabulator, and inline scripts/styles.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.tailwindcss.com https://unpkg.com 'unsafe-eval' 'unsafe-inline'; "
+        "style-src 'self' https://unpkg.com https://fonts.googleapis.com 'unsafe-inline'; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "object-src 'none';"
+        "frame-src blob:;"
+    )
+    return response
 
 # --- App State for startup readiness ---
 app.state.ready_event = asyncio.Event()
@@ -43,6 +59,7 @@ app.include_router(pdf.router)
 app.include_router(sheets.router)
 app.include_router(system.router)
 app.include_router(templates.router)
+app.include_router(dashboard.router) # Include dashboard router
 
 
 def run_startup_tasks():

@@ -5,6 +5,7 @@ import { stopLockTimer, startLockTimer } from "./lockTimer.js";
 
 let state = {};
 let actions = {};
+let dashboardModule = null; // To hold the initialized dashboard module
 
 function setWidescreenIcon(isWidescreen) {
   document.querySelectorAll(".widescreen-toggle-btn").forEach((btn) => {
@@ -88,9 +89,10 @@ function updateActiveNavButton(activeView) {
     .forEach((btn) => btn.classList.add("active-nav"));
 }
 
-export function initializeViewManager(_state, _actions) {
+export function initializeViewManager(_state, _actions, _dashboardModule) {
   state = _state;
   actions = _actions;
+  dashboardModule = _dashboardModule;
 
   document.addEventListener("updateFilterUI", (e) => {
     const status = e.detail;
@@ -111,9 +113,13 @@ export function initializeViewManager(_state, _actions) {
   const viewManager = {
     showView: (viewToShow) => {
       if (!dom.mainView.classList.contains("hidden")) stopLockTimer();
-      [dom.mainView, dom.settingsView, dom.guideView, dom.statsView].forEach(
-        (v) => v.classList.add("hidden")
-      );
+      [
+        dom.mainView,
+        dom.settingsView,
+        dom.guideView,
+        dom.statsView,
+        dom.dashboardView,
+      ].forEach((v) => v.classList.add("hidden"));
 
       switch (viewToShow) {
         case dom.mainView:
@@ -125,10 +131,19 @@ export function initializeViewManager(_state, _actions) {
         case dom.guideView:
           loadGuideContent();
           break;
+        case dom.dashboardView:
+          if (dashboardModule) dashboardModule.loadData();
+          break;
       }
 
       viewToShow.classList.remove("hidden");
       updateActiveNavButton(viewToShow);
+    },
+
+    showAnnotationViewWithPaper: async (paper) => {
+      // This is a new method to bridge the dashboard and the main annotator view
+      await actions.displaySpecificPaper(paper);
+      viewManager.showView(dom.mainView);
     },
 
     runInitialSetupCheck: async () => {
@@ -149,6 +164,16 @@ export function initializeViewManager(_state, _actions) {
         if (!navBtn || !navBtn.dataset.targetView) return;
         const targetView = document.getElementById(navBtn.dataset.targetView);
         if (targetView) {
+          if (
+            targetView === dom.dashboardView &&
+            (!state.currentSheetId || !state.currentDataset)
+          ) {
+            ui.showToastNotification(
+              "Please select a sheet and dataset first.",
+              "warning"
+            );
+            return;
+          }
           if (
             targetView === dom.mainView &&
             !(await viewManager.runInitialSetupCheck())

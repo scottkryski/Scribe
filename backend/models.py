@@ -42,3 +42,7 @@ class SheetUrlRequest(BaseModel):
 
 class ConnectSheetRequest(BaseModel):
     sheet_id: str
+
+class ReopenRequest(BaseModel): # New
+    doi: str
+    dataset: str

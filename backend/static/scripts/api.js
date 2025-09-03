@@ -79,6 +79,68 @@ export async function fetchGeminiSuggestions(
   return data;
 }
 
+// --- Dashboard API ---
+
+export async function getSheetData(dataset) {
+  let url = `${API_BASE_URL}/api/sheet-data`;
+  if (dataset) {
+    url += `?dataset=${encodeURIComponent(dataset)}`;
+  }
+  const response = await fetch(url);
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(
+      errorData.detail || "Failed to fetch sheet data from server."
+    );
+  }
+  return response.json();
+}
+
+export async function reopenAnnotation(doi, dataset) {
+  const response = await fetch(`${API_BASE_URL}/reopen-annotation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ doi, dataset }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || "Failed to reopen annotation.");
+  }
+  return response.json();
+}
+
+// --- FIX: Centralized lock management function now requires dataset ---
+export async function setLock(doi, annotator, dataset) {
+  const response = await fetch(`${API_BASE_URL}/api/set-lock`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ doi, annotator, dataset }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || "Failed to set lock on paper.");
+  }
+  return response.json();
+}
+
+export async function getComments(doi) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/comments/${encodeURIComponent(doi)}`
+  );
+  if (!response.ok) throw new Error("Failed to fetch comments.");
+  return response.json();
+}
+
+export async function addComment({ doi, annotator, comment }) {
+  const response = await fetch(`${API_BASE_URL}/api/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ doi, annotator, comment }),
+  });
+  if (!response.ok) throw new Error("Failed to post comment.");
+  return response.json();
+}
+
 // --- Dataset and Paper Management ---
 
 export async function getDatasets() {

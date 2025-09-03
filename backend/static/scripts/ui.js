@@ -430,6 +430,33 @@ export function setupFieldActionControls() {
         revertAIField(revertBtn.dataset.revertTarget);
         return;
       }
+
+      // --- FIX START: Added lock button functionality ---
+      const lockBtn = event.target.closest(".autofill-lock-btn");
+      if (lockBtn && lockBtn.dataset.targetLock) {
+        const fieldId = lockBtn.dataset.targetLock;
+        const elementToLock = document.getElementById(fieldId);
+        if (!elementToLock) return;
+
+        // Toggle the locked state by checking for the presence of the dataset attribute
+        const isNowLocked = !elementToLock.dataset.locked;
+        if (isNowLocked) {
+          elementToLock.dataset.locked = "true";
+        } else {
+          delete elementToLock.dataset.locked;
+        }
+
+        // Toggle the button's visual state
+        lockBtn.classList.toggle("active", isNowLocked);
+        lockBtn
+          .querySelector(".icon-unlocked")
+          .classList.toggle("hidden", isNowLocked);
+        lockBtn
+          .querySelector(".icon-locked")
+          .classList.toggle("hidden", !isNowLocked);
+        return;
+      }
+      // --- FIX END ---
     });
   }
 }

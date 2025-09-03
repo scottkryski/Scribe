@@ -1,0 +1,231 @@
+# backend/routers/dashboard.py
+import time
+import gspread
+from fastapi import APIRouter, HTTPException
+from typing import Optional
+from pydantic import BaseModel
+from app_state import state
+from models import ReopenRequest
+from database import get_papers_index, get_paper_by_doi_from_file
+from config import LOCK_TIMEOUT_SECONDS
+from datetime import datetime
+
+class SetLockRequest(BaseModel):
+    doi: str
+    annotator: str
+    dataset: str
+
+def _get_comments_worksheet():
+    if not state.worksheet: return None
+    try:
+        ss = state.worksheet.spreadsheet
+        return ss.worksheet("Comments")
+    except Exception:
+        return None
+
+router = APIRouter()
+
+def get_human_readable_timestamp():
+    return datetime.now().strftime('%m/%d/%Y - %I:%M:%S %p')
+
+def is_annotation_complete(record: dict) -> bool:
+    """An annotation is considered complete if the 'annotator' field is filled."""
+    return bool(record.get('annotator', '').strip())
+
+@router.post("/api/set-lock")
+async def set_lock(request: SetLockRequest):
+    if not state.worksheet:
+        raise HTTPException(status_code=400, detail="No active Google Sheet connection.")
+
+    try:
+        headers = state.worksheet.row_values(1)
+        doi_col = headers.index('doi') + 1
+        annotator_col = headers.index('annotator') + 1
+        lock_annotator_col = headers.index('lock_annotator') + 1
+        lock_timestamp_col = headers.index('lock_timestamp') + 1
+
+        old_lock_cell = None
+        try:
+            old_lock_cell = state.worksheet.find(request.annotator, in_column=lock_annotator_col)
+        except gspread.exceptions.CellNotFound:
+            pass 
+
+        new_lock_target_cell = None
+        try:
+            new_lock_target_cell = state.worksheet.find(request.doi, in_column=doi_col)
+        except gspread.exceptions.CellNotFound:
+            pass
+
+        if old_lock_cell:
+            old_lock_row_idx = old_lock_cell.row
+            main_annotator_val = state.worksheet.cell(old_lock_row_idx, annotator_col).value
+            is_placeholder = not main_annotator_val or not main_annotator_val.strip()
+
+            if is_placeholder:
+                state.worksheet.delete_rows(old_lock_row_idx)
+                if new_lock_target_cell and new_lock_target_cell.row > old_lock_row_idx:
+                    new_lock_target_cell = gspread.Cell(row=new_lock_target_cell.row - 1, col=new_lock_target_cell.col)
+            else:
+                state.worksheet.batch_update([
+                    {'range': gspread.utils.rowcol_to_a1(old_lock_row_idx, lock_annotator_col), 'values': [['']]},
+                    {'range': gspread.utils.rowcol_to_a1(old_lock_row_idx, lock_timestamp_col), 'values': [['']]}
+                ])
+
+        if new_lock_target_cell:
+            state.worksheet.batch_update([
+                {'range': gspread.utils.rowcol_to_a1(new_lock_target_cell.row, lock_annotator_col), 'values': [[request.annotator]]},
+                {'range': gspread.utils.rowcol_to_a1(new_lock_target_cell.row, lock_timestamp_col), 'values': [[get_human_readable_timestamp()]]}
+            ], value_input_option='USER_ENTERED')
+        else:
+            paper_info = get_paper_by_doi_from_file(state.AVAILABLE_DATASETS[request.dataset], request.doi)
+            if not paper_info:
+                 raise HTTPException(status_code=404, detail=f"Could not find paper data for DOI {request.doi}")
+            
+            row_values = [""] * len(headers)
+            row_values[headers.index('doi')] = request.doi
+            row_values[headers.index('title')] = paper_info.get('title', 'Title not found')
+            row_values[headers.index('dataset')] = request.dataset
+            row_values[headers.index('lock_annotator')] = request.annotator
+            row_values[headers.index('lock_timestamp')] = get_human_readable_timestamp()
+            
+            state.worksheet.append_row(row_values, value_input_option='USER_ENTERED')
+
+        return {"status": "success", "message": f"Lock transferred to {request.doi}"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to set lock in Google Sheet: {e}")
+
+
+@router.get("/api/sheet-data")
+async def get_sheet_data(dataset: Optional[str] = None):
+    if not state.worksheet:
+        raise HTTPException(status_code=400, detail="No active Google Sheet connection.")
+    
+    active_dataset_name = dataset or getattr(state, 'currentDataset', None)
+    if not active_dataset_name:
+         return {"headers": [], "rows": []}
+
+    try:
+        all_values = state.worksheet.get_all_values()
+        headers = all_values[0] if all_values else []
+        
+        lock_timestamp_col = headers.index('lock_timestamp') + 1 if 'lock_timestamp' in headers else -1
+        if lock_timestamp_col != -1:
+            cells_to_clear = []
+            current_time = time.time()
+            for i, row in enumerate(all_values[1:], start=2):
+                if len(row) >= lock_timestamp_col:
+                    ts_str = row[lock_timestamp_col - 1]
+                    if not ts_str: continue
+                    try:
+                        ts = datetime.strptime(ts_str, '%m/%d/%Y - %I:%M:%S %p').timestamp()
+                    except ValueError:
+                        try: ts = float(ts_str)
+                        except ValueError: continue
+                    
+                    if current_time - ts > LOCK_TIMEOUT_SECONDS:
+                        print(f"LOG: Found stale lock on row {i}. Clearing.")
+                        cells_to_clear.append(gspread.Cell(row=i, col=headers.index('lock_annotator') + 1, value=""))
+                        cells_to_clear.append(gspread.Cell(row=i, col=lock_timestamp_col, value=""))
+            
+            if cells_to_clear:
+                state.worksheet.update_cells(cells_to_clear, value_input_option='USER_ENTERED')
+        
+        sheet_records = state.worksheet.get_all_records()
+
+        sheet_dois = {record.get('doi') for record in sheet_records}
+        all_papers_index = get_papers_index(active_dataset_name)
+
+        latest_comments = {}
+        comments_ws = _get_comments_worksheet()
+        if comments_ws:
+            all_comments = comments_ws.get_all_records()
+            all_comments.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+            for comment in all_comments:
+                doi = comment.get("doi")
+                if doi and doi not in latest_comments:
+                    latest_comments[doi] = f"{comment.get('annotator', 'Anon')}: {comment.get('comment', '')}"
+        
+        if "Latest Comment" not in headers: headers.append("Latest Comment")
+
+        processed_rows = []
+        for record in sheet_records:
+            doi = record.get('doi')
+            if not doi: continue
+            
+            is_complete = is_annotation_complete(record)
+            annotator = record.get('annotator', '')
+            status = 'Incomplete'
+
+            lock_ts_str = str(record.get('lock_timestamp', '')).strip()
+            is_locked = False
+            if lock_ts_str:
+                try:
+                    ts = datetime.strptime(lock_ts_str, '%m/%d/%Y - %I:%M:%S %p').timestamp()
+                except ValueError:
+                    try: ts = float(lock_ts_str)
+                    except ValueError: ts = 0
+                if time.time() - ts < LOCK_TIMEOUT_SECONDS:
+                    is_locked = True
+
+            if is_locked:
+                annotator = record.get('lock_annotator', '')
+                status = 'Reviewing' if is_complete else 'Locked'
+            elif is_complete:
+                status = 'Completed'
+
+            row = {
+                'doi': doi, 'title': record.get('title', 'No Title'),
+                'annotator': annotator, 'status': status,
+                'latest_comment': latest_comments.get(doi, '')
+            }
+            for header in headers:
+                field_key = header.replace(' ', '_').lower()
+                if field_key not in row:
+                    row[field_key] = record.get(header, '')
+            processed_rows.append(row)
+
+        for paper in all_papers_index:
+            if paper['doi'] not in sheet_dois:
+                processed_rows.append({
+                    'doi': paper['doi'], 'title': paper.get('title', 'No Title'),
+                    'annotator': '', 'status': 'Available',
+                    'latest_comment': latest_comments.get(paper['doi'], '')
+                })
+
+        return {"headers": headers, "rows": processed_rows}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve or process sheet data: {e}")
+
+
+@router.post("/reopen-annotation")
+async def reopen_annotation(request: ReopenRequest):
+    if not state.worksheet:
+        raise HTTPException(status_code=400, detail="No active Google Sheet connection.")
+        
+    dataset_path = state.AVAILABLE_DATASETS.get(request.dataset)
+    if not dataset_path:
+        raise HTTPException(status_code=404, detail=f"Dataset '{request.dataset}' not found.")
+
+    paper = get_paper_by_doi_from_file(dataset_path, request.doi)
+    if not paper:
+        raise HTTPException(status_code=404, detail=f"Paper with DOI '{request.doi}' not found in dataset.")
+
+    try:
+        cell = state.worksheet.find(request.doi, in_column=1)
+        if cell:
+            headers = state.worksheet.row_values(1)
+            values = state.worksheet.row_values(cell.row)
+            # --- FIX: Corrected typo from row__data to row_data ---
+            row_data = dict(zip(headers, values))
+            
+            non_placeholder_keys = ['annotator'] + [h for h in headers if '_context' in h or h.startswith('trigger_')]
+            is_real_incomplete = any(row_data.get(key) for key in non_placeholder_keys)
+
+            if is_real_incomplete:
+                paper['existing_annotation'] = row_data
+    except Exception as e:
+        print(f"WARN: Could not find existing annotation for {request.doi} during reopen: {e}")
+    
+    return paper

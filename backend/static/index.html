@@ -7,6 +7,10 @@
     <title>Scribe - Annotation Assistant</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Tabulator CDN (New) -->
+    <link href="https://unpkg.com/tabulator-tables@5.5.0/dist/css/tabulator.min.css" rel="stylesheet">
+    <script type="text/javascript" src="https://unpkg.com/tabulator-tables@5.5.0/dist/js/tabulator.min.js"></script>
+    
     <link rel="stylesheet" href="/static/style.css">
     <script>
         // Apply theme from localStorage before page load to prevent flashing
@@ -50,6 +54,10 @@
                             <button data-target-view="main-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Annotator">
                                 <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                             </button>
+                            <!-- New Dashboard Button -->
+                            <button data-target-view="dashboard-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Dashboard">
+                                <svg class="w-10 h-10 header-icon" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>
+                            </button>
                             <button data-target-view="stats-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Statistics">
                                 <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <rect x="3" y="11" width="4" height="10" rx="1"/> <rect x="10" y="7" width="4" height="14" rx="1"/> <rect x="17" y="3" width="4" height="18" rx="1"/> </svg>
                             </button>
@@ -72,15 +80,12 @@
                             <p class="text-red-200 text-xs">Paper Reserved For:</p>
                             <h4 id="lock-timer-countdown" class="text-xs font-bold tabular-nums">02:00:00</h4>
                         </div>
-
                         <select id="sheet-selector" class="custom-select glass-effect text-white px-3 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all max-w-[200px] truncate">
                             <option value="">Select Sheet</option>
                         </select>
-
                         <select id="dataset-selector" class="custom-select glass-effect text-white px-3 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all max-w-[200px] truncate" disabled>
                             <option value="">Select Dataset</option>
                         </select>
-                        
                         <div id="filter-wrapper" class="relative w-56 flex-shrink-0">
                             <div id="filter-controls" class="flex items-center">
                                 <input type="text" id="filter-input" placeholder="Filter by keyword..." class="bg-transparent px-3 py-2 text-white placeholder-gray-400 focus:outline-none text-sm">
@@ -94,21 +99,16 @@
                     </div>
                 </div>
             </header>
-
             <!-- Main Content Area -->
             <div id="main-content-grid">
                 <!-- Paper Content Panel -->
                 <div id="paper-view" class="glass-effect rounded-3xl p-8 fade-in flex flex-col hidden">
                     <h2 id="paper-title" class="text-3xl font-bold text-white mb-4"></h2>
-                    
                     <div id="no-datasets-message" class="hidden text-center glass-effect rounded-2xl p-8 my-auto">
                         <h3 class="text-2xl font-bold text-yellow-300 mb-4">No Datasets Found</h3>
                         <p class="text-yellow-200 mb-6">To get started, please add your `.jsonl` dataset files to the application's data folder.</p>
-                        <button id="open-data-folder-btn" type="button" class="btn-primary text-lg px-6 py-3">
-                            Open Data Folder
-                        </button>
-                    </div>                    
-
+                        <button id="open-data-folder-btn" type="button" class="btn-primary text-lg px-6 py-3">Open Data Folder</button>
+                    </div>
                     <div id="paper-content-container" class="paper-content mt-4 pt-4 border-t border-white border-opacity-20 hidden">
                         <div id="scroll-glow-top" class="scroll-glow scroll-glow-top"></div>
                         <div id="abstract-container" class="bg-white bg-opacity-10 rounded-lg p-4 hidden">
@@ -126,34 +126,25 @@
                         <div id="scroll-glow-bottom" class="scroll-glow scroll-glow-bottom"></div>
                     </div>
                 </div>
-
                 <!-- Resizer Handle -->
                 <div id="resize-handle" class="resizer" style="display: none;"></div>
-
                 <!-- Annotation Panel -->
                 <div id="annotation-view" class="glass-effect rounded-3xl p-6 fade-in flex flex-col sticky-annotation hidden">
-                    
                     <div class="text-2xl font-bold text-white mb-4">Annotation Info</div>
-                    
                     <div class="glass-effect rounded-2xl p-4 mb-4 space-y-3">
                         <div class="flex flex-col">
                             <label for="paper-doi" class="text-white font-medium text-sm mb-1">DOI:</label>
                             <input type="text" id="paper-doi" name="paper-doi" class="w-full p-2 bg-white bg-opacity-10 rounded-lg text-gray-300 text-sm" readonly tabindex="-1">
                         </div>
                     </div>
-                    
                     <form id="annotation-form" class="flex flex-col h-full">
                         <div id="ai-suggestion-panel" class="glass-effect rounded-2xl p-4 mb-4">
-                            <button id="get-suggestions-btn" type="button" class="w-full glass-hover bg-gradient-to-r from-purple-500 to-indigo-600 text-white py-2 px-4 rounded-lg font-semibold">
-                                Get AI Suggestions
-                            </button>
+                            <button id="get-suggestions-btn" type="button" class="w-full glass-hover bg-gradient-to-r from-purple-500 to-indigo-600 text-white py-2 px-4 rounded-lg font-semibold">Get AI Suggestions</button>
                         </div>
-                        
                         <!-- Scrollable annotation labels -->
                         <div id="annotation-fields-container" class="annotation-panel flex-grow space-y-4">
                             <!-- JS will populate this -->
                         </div>
-
                         <!-- Sticky Bottom Buttons -->
                         <div class="flex space-x-4 mt-6">
                             <button id="submit-btn" type="button" class="flex-1 glass-hover bg-gradient-to-r from-green-500 to-green-600 text-white py-3 px-6 rounded-lg font-semibold">Submit</button>
@@ -181,6 +172,10 @@
                                 <button data-target-view="main-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Annotator">
                                     <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                                 </button>
+                                <!-- New Dashboard Button -->
+                                <button data-target-view="dashboard-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Dashboard">
+                                    <svg class="w-10 h-10 header-icon" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>
+                                </button>
                                 <button data-target-view="stats-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Statistics">
                                     <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <rect x="3" y="11" width="4" height="10" rx="1"/> <rect x="10" y="7" width="4" height="14" rx="1"/> <rect x="17" y="3" width="4" height="18" rx="1"/> </svg>
                                 </button>
@@ -200,7 +195,6 @@
                     </div>
                 </div>
             </header>
-
             <!-- Settings Content -->
             <main class="space-y-8">
                 <!-- First-time setup message -->
@@ -208,7 +202,6 @@
                     <h2 class="text-2xl font-bold mb-4">Welcome to Scribe!</h2>
                     <p>Before you can begin, please complete the initial setup below. You must provide an <strong class="text-white">Annotator Name</strong> and a <strong class="text-white">Gemini API Key</strong> to use the application.</p>
                 </div>
-
                 <!-- User & API Settings -->
                 <div class="glass-effect rounded-3xl p-8 fade-in text-white">
                     <button class="settings-accordion-toggle active w-full flex justify-between items-center text-left focus:outline-none">
@@ -280,7 +273,6 @@
                         </div>
                     </div>
                 </div>
-                
                 <!-- Google Sheets Management -->
                 <div class="glass-effect rounded-3xl p-8 fade-in text-white">
                     <button class="settings-accordion-toggle w-full flex justify-between items-center text-left focus:outline-none">
@@ -307,7 +299,6 @@
                         </div>
                     </div>
                 </div>
-                
                 <!-- Dataset Management -->
                 <div class="glass-effect rounded-3xl p-8 fade-in text-white">
                     <button class="settings-accordion-toggle w-full flex justify-between items-center text-left focus:outline-none">
@@ -328,8 +319,7 @@
                             </p>
                         </div>
                     </div>
-                </div>                
-
+                </div>
                 <!-- Annotation Template Manager -->
                 <div class="glass-effect rounded-3xl p-8 fade-in text-white">
                     <button class="settings-accordion-toggle w-full flex justify-between items-center text-left focus:outline-none">
@@ -365,7 +355,6 @@
                         </div>
                     </div>
                 </div>
-
                 <!-- Theme Settings -->
                 <div class="glass-effect rounded-3xl p-8 fade-in text-white">
                     <button class="settings-accordion-toggle w-full flex justify-between items-center text-left focus:outline-none">
@@ -404,7 +393,6 @@
                 </div>
             </main>
         </div>
-
     </div>
     
     <div id="stats-view" class="hidden">
@@ -422,6 +410,10 @@
                                 </button>
                                 <button data-target-view="main-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Annotator">
                                     <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                </button>
+                                <!-- New Dashboard Button -->
+                                <button data-target-view="dashboard-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Dashboard">
+                                    <svg class="w-10 h-10 header-icon" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>
                                 </button>
                                 <button data-target-view="stats-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Statistics">
                                     <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <rect x="3" y="11" width="4" height="10" rx="1"/> <rect x="10" y="7" width="4" height="14" rx="1"/> <rect x="17" y="3" width="4" height="18" rx="1"/> </svg>
@@ -449,7 +441,6 @@
                     <div class="loading-spinner mx-auto mb-4"></div>
                     <p>Loading latest statistics...</p>
                 </div>
-
                 <div id="stats-content" class="hidden space-y-8">
                     <!-- Top-level Summary -->
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -466,7 +457,6 @@
                             <p id="stats-incomplete-annotations" class="text-4xl font-bold">0</p>
                         </div>
                     </div>
-
                     <!-- Overall Annotation Breakdown -->
                     <div class="glass-effect p-8 rounded-3xl">
                         <h2 class="text-2xl font-bold mb-6 text-white">Overall Annotation Breakdown</h2>
@@ -474,7 +464,6 @@
                             <!-- JS will populate this -->
                         </div>
                     </div>
-
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
                         <!-- Document Type Distribution -->
                         <div class="glass-effect p-8 rounded-3xl lg:col-span-1">
@@ -483,7 +472,6 @@
                                 <!-- JS will populate this -->
                             </div>
                         </div>
-
                         <!-- Community Stats -->
                         <div class="glass-effect p-8 rounded-3xl lg:col-span-2">
                             <h2 class="text-2xl font-bold mb-6 text-white">Community Stats</h2>
@@ -512,6 +500,43 @@
         </div>
     </div>
 
+    <!-- New Dashboard View -->
+    <div id="dashboard-view" class="hidden">
+        <div class="page-container mx-auto px-6 py-8">
+            <header class="glass-effect rounded-3xl p-4 mb-8 fade-in">
+                 <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                     <div>
+                        <div class="flex items-center gap-4">
+                            <h1 class="text-4xl font-bold text-white">Dashboard</h1>
+                             <div class="flex items-center gap-1">
+                                <button class="nav-btn widescreen-toggle-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Toggle Widescreen"><svg class="icon-expand w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4h4 M20 8V4h-4 M4 16v4h4 M20 16v4h-4"></path></svg><svg class="icon-compress w-10 h-10 hidden header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4v4H4 M16 4v4h4 M8 20v-4H4 M16 20v-4h4"></path></svg></button>
+                                <button data-target-view="main-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Annotator"><svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></button>
+                                <button data-target-view="dashboard-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Dashboard"><svg class="w-10 h-10 header-icon" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg></button>
+                                <button data-target-view="stats-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Statistics"><svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <rect x="3" y="11" width="4" height="10" rx="1"/> <rect x="10" y="7" width="4" height="14" rx="1"/> <rect x="17" y="3" width="4" height="18" rx="1"/> </svg></button>
+                                <button data-target-view="settings-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Settings"><svg class="w-10 h-10 gear-icon header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></g></svg></button>
+                                <button data-target-view="guide-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Guide"><svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/> <path d="M12 3v6h6"/> </svg></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+            <main class="glass-effect rounded-3xl p-6 fade-in text-white">
+                <!-- FIX START: Grouped the buttons into their own flex container -->
+                <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
+                    <input id="dashboard-search" type="text" placeholder="Search by title or DOI..." class="w-full md:w-1/3 p-2 bg-black bg-opacity-20 rounded-lg text-white placeholder-gray-400">
+                    <div class="flex items-center gap-4">
+                        <button id="columnsBtn" class="btn-primary">Filter Columns</button>
+                        <button id="dashboard-refresh-btn" class="btn-primary">Refresh</button>
+                    </div>
+                </div>
+                <!-- FIX END -->
+                <div id="dashboard-table-container">
+                    <!-- Tabulator will create the table here -->
+                </div>
+            </main>
+        </div>
+    </div>
+
     <div id ="guide-view" class ="hidden">
         <div class="page-container mx-auto px-6 py-8">
             <!-- Header -->
@@ -527,6 +552,10 @@
                                 </button>
                                 <button data-target-view="main-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Annotator">
                                     <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                                </button>
+                                <!-- New Dashboard Button -->
+                                <button data-target-view="dashboard-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Dashboard">
+                                    <svg class="w-10 h-10 header-icon" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>
                                 </button>
                                 <button data-target-view="stats-view" class="nav-btn glass-hover p-2 rounded-full text-gray-300 hover:text-white" title="Statistics">
                                     <svg class="w-10 h-10 header-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"> <rect x="3" y="11" width="4" height="10" rx="1"/> <rect x="10" y="7" width="4" height="14" rx="1"/> <rect x="17" y="3" width="4" height="18" rx="1"/> </svg>
@@ -547,7 +576,6 @@
                     </div>
                 </div>
             </header>
-
             <!-- Guide Content -->
             <main class="glass-effect rounded-3xl p-4 fade-in text-white">
                 <!-- Content will be loaded here by script.js -->
@@ -564,7 +592,8 @@
     </div>
 
     <div id="reasoning-tooltip" role="tooltip" class="z-50"></div>
-
-    <script type="module" src="/static/app.js"></script>
+    
+    <!-- FIX: Add cache-busting query string -->
+    <script type="module" src="/static/app.js?v=1.1"></script>
 </body>
 </html>

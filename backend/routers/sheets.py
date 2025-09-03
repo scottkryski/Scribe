@@ -4,12 +4,20 @@ import re
 from collections import Counter
 from fastapi import APIRouter, HTTPException
 from gspread.exceptions import APIError
+from pydantic import BaseModel
+from datetime import datetime, timezone
 
 from models import SheetUrlRequest, ConnectSheetRequest
 from app_state import state
 from config import SHEETS_CONFIG_FILE
 
 router = APIRouter()
+
+# NEW: simple pantic model for posting comments
+class NewComment(BaseModel):
+    doi: str
+    comment: str
+    annotator: str
 
 def _read_sheets_config():
     if not SHEETS_CONFIG_FILE.exists(): return []
@@ -42,15 +50,32 @@ def setup_sheet_columns(ws):
         print("LOG: Created default headers in the empty sheet.")
         return
 
-    # --- FIX: Ensure all required columns exist in an existing sheet ---
     required_columns = ['dataset', 'lock_annotator', 'lock_timestamp']
     for col_name in required_columns:
         if col_name not in headers:
             print(f"LOG: Column '{col_name}' not found. Adding it...")
             ws.update_cell(1, len(headers) + 1, col_name)
-            headers.append(col_name) # Update our local copy for subsequent checks
+            headers.append(col_name)
     
     print("LOG: Sheet columns setup complete.")
+
+def ensure_comments_worksheet():
+    """
+    Ensure a 'Comments' worksheet exists in the connected spreadsheet.
+    Returns the gspread Worksheet instance.
+    """
+    if not state.worksheet:
+        raise HTTPException(status_code=400, detail="No Google Sheet connected.")
+    try:
+        ss = state.worksheet.spreadsheet
+        try:
+            ws = ss.worksheet("Comments")
+        except Exception:
+            ws = ss.add_worksheet(title="Comments", rows=1000, cols=4)
+            ws.update('A1:D1', [["doi", "annotator", "timestamp", "comment"]])
+        return ws
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to access/create Comments sheet: {e}")
 
 
 @router.get("/api/sheets")
@@ -95,7 +120,6 @@ def connect_to_sheet(request: ConnectSheetRequest):
         sh = state.gspread_client.open_by_key(request.sheet_id)
         state.worksheet = sh.sheet1
         
-        # This will now automatically add the 'dataset' column if missing
         setup_sheet_columns(state.worksheet)
 
         state.ANNOTATED_ITEMS.clear()
@@ -104,16 +128,23 @@ def connect_to_sheet(request: ConnectSheetRequest):
         all_records = state.worksheet.get_all_records()
 
         if all_records:
-            headers = all_records[0].keys()
-            required_headers = [h for h in headers if h and '_context' not in h.lower() and 'lock_' not in h.lower()]
+            # --- FIX START: Redefined "completeness" logic ---
+            # An annotation is complete if it has an annotator.
+            # It's incomplete if it has data but no annotator.
             for i, rec in enumerate(all_records, start=2):
                 doi = rec.get('doi', '').strip()
                 if not doi: continue
-                is_complete = all(str(rec.get(header, '')).strip() != '' for header in required_headers)
+
+                is_complete = bool(rec.get('annotator', '').strip())
+                
                 if is_complete:
                     state.ANNOTATED_ITEMS.add(doi)
                 else:
-                    state.INCOMPLETE_ANNOTATIONS[doi] = {'data': rec, 'row_num': i}
+                    # Check if it's more than just a placeholder before adding to incomplete
+                    other_values = [v for k, v in rec.items() if k not in ['doi', 'title', 'dataset', 'lock_annotator', 'lock_timestamp'] and v]
+                    if other_values:
+                         state.INCOMPLETE_ANNOTATIONS[doi] = {'data': rec, 'row_num': i}
+            # --- FIX END ---
 
         return {"status": "success", "completed_count": len(state.ANNOTATED_ITEMS), "incomplete_count": len(state.INCOMPLETE_ANNOTATIONS)}
     except APIError as e:
@@ -152,3 +183,18 @@ def get_detailed_stats():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get detailed stats: {e}")
+
+@router.get("/api/comments/{doi:path}")
+def list_comments(doi: str):
+    ws = ensure_comments_worksheet()
+    rows = ws.get_all_records()
+    items = [r for r in rows if str(r.get("doi","")).strip() == doi.strip()]
+    items.sort(key=lambda r: r.get("timestamp",""), reverse=True)
+    return {"items": items}
+
+@router.post("/api/comments")
+def add_comment(payload: NewComment):
+    ws = ensure_comments_worksheet()
+    ts = datetime.now(timezone.utc).isoformat()
+    ws.append_row([payload.doi, payload.annotator, ts, payload.comment], value_input_option="RAW")
+    return {"ok": True, "timestamp": ts}

@@ -1,24 +1,191 @@
-/* static/components.css */
+/* static/css/components.css
+   v2025-09-01 – consolidated, with strong Tabulator readability overrides.
+   Uses CSS variables when available and safe fallbacks otherwise.
+*/
 
-/* This file is for reusable UI components like buttons, forms, tooltips, etc. */
-
-/* --- Glass Effects & Hovers --- */
+/* ========== Base “glass” components ========== */
 .glass-effect {
-    background: var(--glass-bg);
-    backdrop-filter: blur(10px);
-    border: 1px solid var(--glass-border);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  background: var(--glass-bg, rgba(17, 24, 39, 0.55));
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border, rgba(255,255,255,0.08));
+  box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+}
+.glass-hover { transition: all 0.3s ease; }
+.glass-hover:hover { transform: translateY(-1px); box-shadow: 0 10px 36px rgba(0,0,0,0.18); }
+
+/* ========== Buttons ========== */
+.btn {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .55rem .9rem; border-radius: .75rem;
+  background: var(--btn-bg, rgba(31, 41, 55, 0.8));
+  color: var(--btn-fg, #e5e7eb);
+  border: 1px solid var(--glass-border, rgba(255,255,255,.08));
+  cursor: pointer; user-select: none; transition: background .2s, transform .1s;
+}
+.btn:hover { background: var(--btn-bg-hover, rgba(55,65,81,.9)); }
+.btn:active { transform: translateY(1px); }
+.btn.primary {
+  background: var(--accent, #3b82f6); color: #fff; border-color: transparent;
+}
+.btn.primary:hover { filter: brightness(1.05); }
+
+/* ========== Badges/Chips ========== */
+.badge {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .15rem .5rem; border-radius: 9999px;
+  font-size: .75rem; font-weight: 600;
+  background: var(--badge-bg, rgba(31,41,55,.55));
+  color: var(--badge-fg, #e5e7eb);
+  border: 1px solid var(--glass-border, rgba(255,255,255,.08));
+}
+.badge.warn  { background: rgba(234,179,8,.2);  color: #fcd34d; }
+.badge.ok    { background: rgba(16,185,129,.2); color: #34d399; }
+.badge.info  { background: rgba(59,130,246,.2); color: #93c5fd; }
+.badge.error { background: rgba(239,68,68,.2);  color: #fca5a5; }
+
+/* ========== Cards ========== */
+.card {
+  background: var(--panel-bg, rgba(17,24,39,.6));
+  border: 1px solid var(--glass-border, rgba(255,255,255,.08));
+  border-radius: 1rem; padding: 1rem;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
 }
 
-.glass-hover {
-    transition: all 0.3s ease;
+/* ========== Tooltip ========== */
+.tooltip {
+  position: relative; display: inline-flex; align-items: center;
+}
+.tooltip[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, -.5rem);
+  white-space: nowrap; pointer-events: none; z-index: 50;
+  padding: .35rem .5rem; border-radius: .5rem;
+  background: rgba(31,41,55,.95); color: #f9fafb; font-size: .75rem;
+  border: 1px solid var(--glass-border, rgba(255,255,255,.12));
 }
 
-.glass-hover:hover {
-    background: var(--glass-hover-bg);
-    transform: translateY(-2px);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+/* ========== Accordion (settings) ========== */
+.settings-accordion { width: 100%; }
+.settings-accordion-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: .9rem 1rem; border-radius: .75rem;
+  background: rgba(31,41,55,.65); color: #e5e7eb;
+  border: 1px solid var(--glass-border, rgba(255,255,255,.08));
+  cursor: pointer;
 }
+.settings-accordion-content {
+  max-height: 0; overflow: hidden;
+  margin-top: 0; padding-top: 0; border-top-width: 0;
+  border-color: var(--glass-border, rgba(255,255,255,.08));
+  transition: max-height .5s ease, margin-top .5s ease, padding-top .5s ease, border-top-width .5s ease;
+}
+.settings-accordion-content.open {
+  max-height: 20000px; margin-top: 1.5rem; padding-top: 1.5rem; border-top-width: 1px;
+}
+
+/* ========== Inputs ========== */
+.input, input[type="text"], input[type="search"] {
+  background: rgba(31,41,55,.75);
+  color: #f3f4f6; border: 1px solid var(--glass-border, rgba(255,255,255,.08));
+  border-radius: .65rem; padding: .55rem .7rem; outline: none;
+}
+.input::placeholder { color: #9ca3af; }
+
+/* =========================================================
+   TABULATOR – Readability Overrides (KEEP THIS AT THE END)
+   ========================================================= */
+
+/* Table shell */
+.tabulator { background: transparent !important; border: none !important; }
+.tabulator .tabulator-tableholder { background: transparent !important; }
+.tabulator .tabulator-table { background: transparent !important; }
+
+/* Header */
+.tabulator .tabulator-header {
+  background: var(--table-header-bg, rgba(17,24,39,.92)) !important;
+  color: var(--table-header-fg, #e5e7eb) !important;
+  border-bottom: 1px solid var(--glass-border, rgba(255,255,255,.08)) !important;
+}
+.tabulator .tabulator-header .tabulator-col {
+  background: transparent !important;
+  border-right: 1px solid var(--glass-border, rgba(255,255,255,.06)) !important;
+}
+.tabulator .tabulator-col .tabulator-col-title { color: inherit !important; }
+.tabulator .tabulator-col .tabulator-col-sorter .tabulator-arrow {
+  border-bottom-color: var(--table-header-fg, #e5e7eb) !important;
+}
+.tabulator .tabulator-col.tabulator-sort-asc .tabulator-arrow {
+  border-bottom-color: var(--accent, #93c5fd) !important;
+}
+.tabulator .tabulator-col.tabulator-sort-desc .tabulator-arrow {
+  border-top-color: var(--accent, #93c5fd) !important;
+}
+
+/* Rows & cells */
+.tabulator .tabulator-row {
+  background: transparent !important;
+  border-bottom: 1px solid var(--glass-border, rgba(255,255,255,.06)) !important;
+}
+.tabulator .tabulator-row .tabulator-cell {
+  background: var(--table-row-bg, rgba(17,24,39,.70)) !important;
+  color: var(--table-row-fg, #f3f4f6) !important;
+}
+.tabulator .tabulator-row.tabulator-row-odd .tabulator-cell {
+  background: var(--table-row-alt-bg, rgba(17,24,39,.78)) !important;
+}
+.tabulator .tabulator-row:hover .tabulator-cell,
+.tabulator .tabulator-row.tabulator-selectable:hover .tabulator-cell {
+  background: var(--table-row-hover-bg, rgba(31,41,55,.92)) !important;
+  color: var(--table-row-hover-fg, #ffffff) !important;
+}
+
+/* Selection & active */
+.tabulator .tabulator-row.tabulator-selected .tabulator-cell {
+  background: var(--table-row-selected-bg, rgba(59,130,246,.28)) !important;
+  color: var(--table-row-selected-fg, #ffffff) !important;
+}
+.tabulator .tabulator-row.tabulator-moving .tabulator-cell {
+  background: var(--table-row-drag-bg, rgba(147,197,253,.22)) !important;
+}
+
+/* Placeholder / empty state */
+.tabulator .tabulator-placeholder {
+  background: transparent !important;
+  color: var(--text-secondary, #9ca3af) !important;
+}
+
+/* Footer (if used) */
+.tabulator .tabulator-footer {
+  background: var(--table-footer-bg, rgba(17,24,39,.9)) !important;
+  color: var(--table-footer-fg, #e5e7eb) !important;
+  border-top: 1px solid var(--glass-border, rgba(255,255,255,.08)) !important;
+}
+.tabulator .tabulator-footer .tabulator-paginator button {
+  background: rgba(31,41,55,.6) !important; color: #e5e7eb !important;
+  border: 1px solid var(--glass-border, rgba(255,255,255,.08)) !important;
+}
+.tabulator .tabulator-footer .tabulator-paginator button:hover {
+  background: rgba(55,65,81,.85) !important;
+}
+
+/* Header filter inputs inside Tabulator */
+.tabulator .tabulator-header .tabulator-col input[type="search"],
+.tabulator .tabulator-header .tabulator-col input[type="text"],
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input {
+  background: rgba(31,41,55,.85) !important;
+  color: #f9fafb !important;
+  border: 1px solid var(--glass-border, rgba(255,255,255,.12)) !important;
+  border-radius: .5rem !important;
+  outline: none; height: 30px; padding: 0 .5rem;
+}
+
+/* Scrollbar (WebKit) */
+.tabulator .tabulator-tableholder::-webkit-scrollbar { height: 10px; width: 10px; }
+.tabulator .tabulator-tableholder::-webkit-scrollbar-thumb {
+  background: rgba(107,114,128,.6); border-radius: 8px;
+}
+.tabulator .tabulator-tableholder::-webkit-scrollbar-track { background: transparent; }
+
 
 /* --- Loaders --- */
 .loading-spinner {

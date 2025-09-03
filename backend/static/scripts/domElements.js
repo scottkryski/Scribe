@@ -11,6 +11,7 @@ export let mainView = null;
 export let settingsView = null;
 export let guideView = null;
 export let statsView = null;
+export let dashboardView = null; // New
 
 // --- Controls & Inputs ---
 export let datasetSelector = null;
@@ -59,6 +60,11 @@ export let openDataFolderBtnSettings = null;
 export let openDataFolderBtnMain = null;
 export let refreshDatasetsBtn = null;
 
+// --- Dashboard Elements (New) ---
+export let dashboardTableContainer = null;
+export let dashboardRefreshBtn = null;
+export let dashboardSearchInput = null;
+
 export function init() {
   // This function is called once the DOM is fully loaded
 
@@ -73,6 +79,7 @@ export function init() {
   settingsView = document.getElementById("settings-view");
   guideView = document.getElementById("guide-view");
   statsView = document.getElementById("stats-view");
+  dashboardView = document.getElementById("dashboard-view"); // New
 
   // --- Controls & Inputs ---
   datasetSelector = document.getElementById("dataset-selector");
@@ -127,4 +134,11 @@ export function init() {
   );
   openDataFolderBtnMain = document.getElementById("open-data-folder-btn");
   refreshDatasetsBtn = document.getElementById("refresh-datasets-btn");
+
+  // --- Dashboard Elements (New) ---
+  dashboardTableContainer = document.getElementById(
+    "dashboard-table-container"
+  );
+  dashboardRefreshBtn = document.getElementById("dashboard-refresh-btn");
+  dashboardSearchInput = document.getElementById("dashboard-search");
 }

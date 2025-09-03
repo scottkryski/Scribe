@@ -136,6 +136,13 @@ export function initializeActions(_state) {
   state = _state;
 
   return {
+    // New function exposed for external modules like viewManager
+    displaySpecificPaper: async (paper) => {
+      stopLockTimer();
+      ui.showLoading("Loading Paper...", `Loading ${paper.doi}...`);
+      await displayPaper(paper);
+    },
+
     submitAnnotation: async () => {
       const annotatorName = localStorage.getItem("annotatorName") || "";
       if (!state.currentPaper || !annotatorName) {

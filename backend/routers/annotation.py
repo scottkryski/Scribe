@@ -3,6 +3,7 @@ import time
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 from gspread.exceptions import APIError
+from datetime import datetime
 
 from models import AnnotationSubmission, SkipRequest
 from app_state import state
@@ -11,7 +12,12 @@ from database import get_paper_by_doi_from_file
 
 router = APIRouter()
 
+# --- FIX: Use a cross-platform compatible timestamp format ---
+def get_human_readable_timestamp():
+    return datetime.now().strftime('%m/%d/%Y - %I:%M:%S %p')
+
 def clear_lock(doi: str):
+    """Finds a row by DOI and clears the lock_annotator and lock_timestamp fields."""
     print(f"LOG: Attempting to clear lock for DOI: {doi}")
     if not state.worksheet:
         return
@@ -44,26 +50,25 @@ def check_for_resumable_paper(annotator: str):
         headers = all_values[0]
         required_cols = ['doi', 'title', 'dataset', 'lock_annotator', 'lock_timestamp']
         if not all(h in headers for h in required_cols):
-            print("WARN-LOG: Sheet is missing required columns for resumption check.")
             return {"resumable": False}
 
         doi_idx, title_idx, dataset_idx, lock_annotator_idx, lock_timestamp_idx = (headers.index(h) for h in required_cols)
 
         for row in reversed(all_values[1:]):
             if len(row) > max(lock_annotator_idx, lock_timestamp_idx, doi_idx, title_idx, dataset_idx):
-                lock_holder = row[lock_annotator_idx].strip()
-                lock_time_str = row[lock_timestamp_idx]
-                dataset_name = row[dataset_idx]
-
-                if lock_holder == annotator and lock_time_str and dataset_name:
+                if row[lock_annotator_idx].strip() == annotator and row[lock_timestamp_idx]:
                     try:
-                        if time.time() - float(lock_time_str) < LOCK_TIMEOUT_SECONDS:
-                            print(f"LOG: Found resumable paper for {annotator}. DOI: {row[doi_idx]} in dataset: {dataset_name}")
+                        ts_str = row[lock_timestamp_idx]
+                        try:
+                            ts = datetime.strptime(ts_str, '%m/%d/%Y - %I:%M:%S %p').timestamp()
+                        except ValueError:
+                            ts = float(ts_str)
+
+                        if time.time() - ts < LOCK_TIMEOUT_SECONDS:
+                            print(f"LOG: Found resumable paper for {annotator}. DOI: {row[doi_idx]}")
                             return {
-                                "resumable": True,
-                                "doi": row[doi_idx],
-                                "title": row[title_idx],
-                                "dataset": dataset_name
+                                "resumable": True, "doi": row[doi_idx],
+                                "title": row[title_idx], "dataset": row[dataset_idx]
                             }
                     except (ValueError, TypeError):
                         continue
@@ -90,7 +95,6 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
         if not headers:
             headers = ['doi', 'title', 'dataset', 'annotator', 'lock_annotator', 'lock_timestamp']
             state.worksheet.update('A1', [headers])
-            print("LOG: Created initial headers in empty sheet via get_next_paper.")
 
         doi_col_idx = headers.index('doi')
         lock_annotator_col_idx = headers.index('lock_annotator')
@@ -104,7 +108,11 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
                 doi = row[doi_col_idx]
                 if doi and row[lock_annotator_col_idx].strip() != annotator and row[lock_timestamp_col_idx]:
                     try:
-                        if time.time() - float(row[lock_timestamp_col_idx]) < LOCK_TIMEOUT_SECONDS:
+                        ts_str = row[lock_timestamp_col_idx]
+                        try: ts = datetime.strptime(ts_str, '%m/%d/%Y - %I:%M:%S %p').timestamp()
+                        except ValueError: ts = float(ts_str)
+                        
+                        if time.time() - ts < LOCK_TIMEOUT_SECONDS:
                             unavailable_dois.add(doi)
                     except (ValueError, TypeError): pass
 
@@ -131,19 +139,20 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
             cell = state.worksheet.find(candidate_doi, in_column=doi_col_idx + 1)
             if cell:
                 state.worksheet.update_cell(cell.row, lock_annotator_col_idx + 1, annotator)
-                state.worksheet.update_cell(cell.row, lock_timestamp_col_idx + 1, time.time())
+                state.worksheet.update_cell(cell.row, lock_timestamp_col_idx + 1, get_human_readable_timestamp())
             else:
-                new_row_data = {h: "" for h in headers}
-                new_row_data.update({
+                placeholder_row = {h: "" for h in headers}
+                placeholder_row.update({
                     'doi': candidate_doi, 'title': full_candidate_paper.get('title', ''), 'dataset': dataset,
-                    'lock_annotator': annotator, 'lock_timestamp': time.time()
+                    'lock_annotator': annotator, 'lock_timestamp': get_human_readable_timestamp()
                 })
-                state.worksheet.append_row([new_row_data.get(h, "") for h in headers], value_input_option='USER_ENTERED')
+                state.worksheet.append_row([placeholder_row.get(h, "") for h in headers], value_input_option='USER_ENTERED')
             
             full_candidate_paper['lock_info'] = {"locked": True, "remaining_seconds": LOCK_TIMEOUT_SECONDS}
         except Exception as e:
-            print(f"WARN-LOG: Could not lock paper {candidate_doi}. Reason: {e}")
+            raise HTTPException(status_code=500, detail=f"Could not acquire lock for paper in Google Sheet. Reason: {e}")
 
+        # --- FIX: Corrected typo from INCOMEPLETE to INCOMPLETE ---
         if candidate_doi in state.INCOMPLETE_ANNOTATIONS:
             full_candidate_paper['existing_annotation'] = state.INCOMPLETE_ANNOTATIONS[candidate_doi]['data']
         
@@ -165,7 +174,6 @@ def submit_annotation(submission: AnnotationSubmission):
             base_headers = ['doi', 'title', 'dataset', 'annotator']
             headers = base_headers + [h for h in headers if h not in base_headers]
             state.worksheet.update('A1', [headers])
-            print("LOG: Created headers from first submission.")
 
         flat_submission = {"doi": submission.doi, "title": submission.title, "dataset": submission.dataset, "annotator": submission.annotator, **submission.annotations}
         
@@ -199,6 +207,7 @@ def submit_annotation(submission: AnnotationSubmission):
             state.DATASET_QUEUES[submission.dataset] = [p for p in state.DATASET_QUEUES[submission.dataset] if p.get('doi') != submitted_doi]
         
         state.ANNOTATED_ITEMS.add(submitted_doi)
+        # --- FIX: Corrected typo from INCOMEPLETE to INCOMPLETE ---
         if submitted_doi in state.INCOMPLETE_ANNOTATIONS:
             del state.INCOMPLETE_ANNOTATIONS[submitted_doi]
 
@@ -212,13 +221,22 @@ def get_lock_status(doi: str):
     try:
         headers = state.worksheet.row_values(1)
         if 'doi' not in headers or 'lock_timestamp' not in headers: return {"locked": False, "remaining_seconds": 0}
+        
         doi_col_index = headers.index('doi') + 1
         lock_ts_col_index = headers.index('lock_timestamp') + 1
+        
         cell = state.worksheet.find(doi, in_column=doi_col_index)
         if not cell: return {"locked": False, "remaining_seconds": 0}
+        
         lock_timestamp_str = state.worksheet.cell(cell.row, lock_ts_col_index).value
         if not lock_timestamp_str: return {"locked": False, "remaining_seconds": 0}
-        elapsed_time = time.time() - float(lock_timestamp_str)
+
+        try:
+            ts = datetime.strptime(lock_timestamp_str, '%m/%d/%Y - %I:%M:%S %p').timestamp()
+        except ValueError:
+            ts = float(lock_timestamp_str)
+
+        elapsed_time = time.time() - ts
         if elapsed_time < LOCK_TIMEOUT_SECONDS:
             return {"locked": True, "remaining_seconds": int(LOCK_TIMEOUT_SECONDS - elapsed_time)}
         else:
@@ -229,22 +247,42 @@ def get_lock_status(doi: str):
 @router.post("/skip-paper")
 def skip_paper(request: SkipRequest):
     if not state.worksheet: raise HTTPException(status_code=400, detail="No Google Sheet is currently connected.")
-    clear_lock(request.doi)
+    
+    try:
+        headers = state.worksheet.row_values(1)
+        doi_col_idx = headers.index('doi') + 1
+        annotator_col_idx = headers.index('annotator') + 1
+        
+        cell = state.worksheet.find(request.doi, in_column=doi_col_idx)
+        if cell:
+            annotator_val = state.worksheet.cell(cell.row, annotator_col_idx).value
+            if not annotator_val or not annotator_val.strip():
+                print(f"LOG: Deleting placeholder row {cell.row} for skipped DOI {request.doi}.")
+                state.worksheet.delete_rows(cell.row)
+            else:
+                clear_lock(request.doi)
+    except Exception as e:
+        print(f"WARN: Could not process sheet row for skipped DOI {request.doi}. Reason: {e}")
+
     if request.dataset in state.DATASET_QUEUES and state.DATASET_QUEUES[request.dataset]:
         queue = state.DATASET_QUEUES[request.dataset]
         paper_to_move = next((p for i, p in enumerate(queue) if p.get('doi') == request.doi), None)
         if paper_to_move:
             queue.remove(paper_to_move)
             queue.append(paper_to_move)
+            
     return {"status": "success", "skipped_doi": request.doi}
 
 @router.get("/get-paper-by-doi")
 def get_paper_by_doi(doi: str, dataset: str):
     if dataset not in state.AVAILABLE_DATASETS:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found.")
+    
     paper_data = get_paper_by_doi_from_file(state.AVAILABLE_DATASETS[dataset], doi)
+    
     if paper_data:
         paper_data['lock_info'] = get_lock_status(doi)
+        # --- FIX: Corrected typo from INCOMEPLETE to INCOMPLETE ---
         if doi in state.INCOMPLETE_ANNOTATIONS:
             paper_data['existing_annotation'] = state.INCOMPLETE_ANNOTATIONS[doi]['data']
         return paper_data
