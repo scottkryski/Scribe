@@ -109,7 +109,6 @@ export async function reopenAnnotation(doi, dataset) {
   return response.json();
 }
 
-// --- FIX: Centralized lock management function now requires dataset ---
 export async function setLock(doi, annotator, dataset) {
   const response = await fetch(`${API_BASE_URL}/api/set-lock`, {
     method: "POST",
@@ -332,6 +331,24 @@ export async function getTemplate(templateName) {
   return response.json();
 }
 
+export async function saveTemplateToSheet(sheetId, templateData) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/sheets/${sheetId}/template`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templateData }),
+    }
+  );
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(
+      errorData.detail || "Failed to save template to the sheet."
+    );
+  }
+  return response.json();
+}
+
 export async function saveTemplate(templateName, data) {
   const response = await fetch(
     `${API_BASE_URL}/api/templates/${templateName}`,
@@ -420,8 +437,44 @@ export async function connectToSheet(sheet_id) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sheet_id }),
   });
-  if (!response.ok) throw new Error((await response.json()).detail);
-  return response.json();
+  const responseData = await response.json();
+  if (!response.ok) {
+    throw new Error(responseData.detail);
+  }
+  return responseData;
+}
+
+export async function getSheetTemplate(sheetId) {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/sheets/${sheetId}/template`
+    );
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.log("No template found on sheet.");
+        return null;
+      }
+      throw new Error("Failed to fetch sheet template from server.");
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Error fetching sheet template:", error);
+    return null;
+  }
+}
+
+// --- FIX: New function to get template status ---
+export async function getSheetTemplateStatus(sheetId) {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/sheets/${sheetId}/template-status`
+    );
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (error) {
+    console.warn("Could not check template status:", error);
+    return null;
+  }
 }
 
 export async function checkForUpdates() {

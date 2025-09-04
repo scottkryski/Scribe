@@ -234,7 +234,10 @@ export function initializeSettings(_state, _viewManager, _buildAnnotationForm) {
         });
       }
 
-      await templates.initTemplateManager(buildAnnotationFormFromTemplate);
+      await templates.initTemplateManager(
+        buildAnnotationFormFromTemplate,
+        state
+      );
       await initializeSheetsManagementUI();
       await populateAndSetModels();
       updateActiveThemeButton();

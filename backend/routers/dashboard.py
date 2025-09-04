@@ -1,5 +1,6 @@
 # backend/routers/dashboard.py
 import time
+from collections import Counter
 import gspread
 from fastapi import APIRouter, HTTPException
 from typing import Optional
@@ -31,6 +32,17 @@ def get_human_readable_timestamp():
 def is_annotation_complete(record: dict) -> bool:
     """An annotation is considered complete if the 'annotator' field is filled."""
     return bool(record.get('annotator', '').strip())
+
+def _get_all_records():
+    """Helper to safely get all records from the connected worksheet."""
+    if not state.worksheet:
+        print("WARN: Attempted to get records but no worksheet is connected.")
+        return []
+    try:
+        return state.worksheet.get_all_records()
+    except Exception as e:
+        print(f"ERROR: Could not fetch records from Google Sheet: {e}")
+        return []
 
 @router.post("/api/set-lock")
 async def set_lock(request: SetLockRequest):
@@ -229,3 +241,70 @@ async def reopen_annotation(request: ReopenRequest):
         print(f"WARN: Could not find existing annotation for {request.doi} during reopen: {e}")
     
     return paper
+
+@router.get("/get-sheet-stats")
+async def get_sheet_stats():
+    """Provides simple counts of completed vs incomplete annotations."""
+    records = _get_all_records()
+    if not records:
+        return {"completed_count": 0, "incomplete_count": 0}
+
+    status_counts = Counter(r.get("status") for r in records)
+    return {
+        "completed_count": status_counts.get("Completed", 0),
+        "incomplete_count": status_counts.get("Incomplete", 0)
+    }
+
+@router.get("/get-detailed-stats")
+async def get_detailed_stats():
+    records = _get_all_records()
+    if not records:
+        raise HTTPException(status_code=404, detail="No data found in the sheet to generate stats.")
+
+    total_annotations = len(records)
+    overall_counts = {}
+    doc_type_counts = Counter()
+    annotator_counts = Counter()
+    dataset_counts = Counter()
+    # --- FIX: Add status counter ---
+    status_counts = Counter()
+
+    headers = list(records[0].keys()) if records else []
+    boolean_fields = [h for h in headers if h.startswith("trigger_") and not h.endswith("_context")]
+    
+    for record in records:
+        for field in boolean_fields:
+            if field not in overall_counts:
+                overall_counts[field] = Counter()
+            value = str(record.get(field, "")).upper()
+            if value in ["TRUE", "FALSE"]:
+                overall_counts[field][value] += 1
+
+        doc_type = record.get("attribute_docType")
+        if doc_type:
+            doc_type_counts[doc_type] += 1
+
+        # --- FIX: Make annotator lookup case-insensitive ---
+        annotator = record.get("Annotator") or record.get("annotator")
+        if annotator:
+            annotator_counts[annotator] += 1
+        
+        dataset = record.get("Dataset")
+        if dataset:
+            dataset_counts[dataset] += 1
+            
+        # --- FIX: Count statuses correctly ---
+        status = record.get("status", "Completed") or "Completed"
+        status_counts[status] += 1
+
+    leaderboard = [{"annotator": a, "count": c} for a, c in annotator_counts.most_common()]
+
+    return {
+        "total_annotations": total_annotations,
+        "completed_annotations": status_counts.get("Completed", 0),
+        "incomplete_annotations": status_counts.get("Incomplete", 0),
+        "overall_counts": overall_counts,
+        "doc_type_distribution": doc_type_counts,
+        "leaderboard": leaderboard,
+        "dataset_stats": dataset_counts
+    }

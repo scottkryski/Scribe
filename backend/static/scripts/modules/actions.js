@@ -4,14 +4,15 @@ import * as api from "../api.js";
 import * as ui from "../ui.js";
 import * as highlighting from "../highlighting.js";
 import { startLockTimer, stopLockTimer } from "./lockTimer.js";
+import * as templates from "../templates.js";
 
 let state = {};
+let buildAnnotationFormFromTemplateRef;
 
-// --- Helper functions for Auto-Fill ---
+// --- (Helper functions and other actions remain unchanged) ---
 function applyAutoFillRule(rule, triggerId) {
   const targetEl = document.getElementById(rule.targetId);
   if (!targetEl || targetEl.dataset.locked === "true") return;
-
   let valueChanged = false;
   if (
     targetEl.type === "hidden" &&
@@ -32,17 +33,14 @@ function applyAutoFillRule(rule, triggerId) {
       valueChanged = true;
     }
   }
-
   if (valueChanged) {
     ui.showDebouncedAutoFillNotification();
     targetEl.dataset.autofilledBy = triggerId;
     targetEl.dispatchEvent(new Event("change", { bubbles: true }));
   }
 }
-
 function resetField(fieldElement) {
   if (!fieldElement || fieldElement.dataset.locked === "true") return;
-
   const originalValue = fieldElement.value;
   if (
     fieldElement.type === "hidden" &&
@@ -56,35 +54,28 @@ function resetField(fieldElement) {
   } else if (fieldElement.tagName === "SELECT") {
     fieldElement.value = "";
   }
-
   if (originalValue !== fieldElement.value) {
     delete fieldElement.dataset.autofilledBy;
     fieldElement.dispatchEvent(new Event("change", { bubbles: true }));
   }
 }
-
-// --- Main Action Functions ---
 async function displayPaper(paper) {
   state.currentPaper = paper;
   dom.paperView.classList.remove("hidden");
   dom.annotationView.classList.remove("hidden");
   dom.paperContentContainer.classList.remove("hidden");
-
   if (window.innerWidth >= 1024) {
     document.getElementById("resize-handle").style.display = "flex";
   } else {
     document.getElementById("resize-handle").style.display = "none";
   }
-
   const { originalAbstractHTML, originalFullTextHTML } = await ui.renderPaper(
     paper
   );
   startLockTimer();
-
   state.originalAbstractHTML = originalAbstractHTML;
   state.originalFullTextHTML = originalFullTextHTML;
   state.activeHighlightIds.clear();
-
   document
     .querySelectorAll(".highlight-toggle-btn")
     .forEach((btn) => btn.classList.remove("active"));
@@ -94,10 +85,8 @@ async function displayPaper(paper) {
     state.originalFullTextHTML,
     state.activeTemplate
   );
-
   ui.hideLoading();
 }
-
 async function fetchAndDisplayNextPaper(retryCount = 0, skipDoi = null) {
   if (!state.currentDataset) return;
   stopLockTimer();
@@ -118,7 +107,6 @@ async function fetchAndDisplayNextPaper(retryCount = 0, skipDoi = null) {
     document.getElementById("resize-handle").style.display = "none";
   }
 }
-
 async function fetchAndDisplaySpecificPaper(doi, dataset) {
   stopLockTimer();
   ui.showLoading("Resuming Session", "Fetching your previous paper...");
@@ -135,8 +123,11 @@ async function fetchAndDisplaySpecificPaper(doi, dataset) {
 export function initializeActions(_state) {
   state = _state;
 
-  return {
-    // New function exposed for external modules like viewManager
+  const actionsApi = {
+    setBuildFormCallback: (callback) => {
+      buildAnnotationFormFromTemplateRef = callback;
+    },
+
     displaySpecificPaper: async (paper) => {
       stopLockTimer();
       ui.showLoading("Loading Paper...", `Loading ${paper.doi}...`);
@@ -228,17 +219,82 @@ export function initializeActions(_state) {
       document
         .getElementById("filter-status-container")
         .classList.add("hidden");
+      document.getElementById("filter-input").value = "";
+
+      // --- FIX: Reset timestamp state on change ---
+      state.sheetTemplateTimestamp = null;
+
       if (!selectedSheetId) {
         dom.datasetSelector.disabled = true;
         dom.datasetSelector.innerHTML =
           '<option value="">Select Dataset</option>';
+        document.dispatchEvent(
+          new CustomEvent("sheetTemplateActive", {
+            detail: { active: false, hasTemplate: false },
+          })
+        );
         return;
       }
+
       ui.showLoading("Connecting to Sheet...", "Loading metadata...");
+
       try {
-        await api.connectToSheet(selectedSheetId);
+        const connectionResult = await api.connectToSheet(selectedSheetId);
         state.currentSheetId = selectedSheetId;
         localStorage.setItem("currentSheetId", selectedSheetId);
+
+        if (connectionResult.has_sheet_template) {
+          // --- FIX START: Store timestamp and start polling ---
+          state.sheetTemplateTimestamp = connectionResult.template_timestamp;
+          document.dispatchEvent(new CustomEvent("startTemplatePolling"));
+          // --- FIX END ---
+
+          ui.showLoading(
+            "Connecting to Sheet...",
+            "Found sheet template, loading..."
+          );
+          const sheetTemplate = await api.getSheetTemplate(selectedSheetId);
+          if (sheetTemplate && buildAnnotationFormFromTemplateRef) {
+            buildAnnotationFormFromTemplateRef(sheetTemplate);
+            document.dispatchEvent(
+              new CustomEvent("loadSheetTemplate", { detail: sheetTemplate })
+            );
+
+            document.dispatchEvent(
+              new CustomEvent("sheetTemplateActive", {
+                detail: { active: true, hasTemplate: true },
+              })
+            );
+            ui.showToastNotification(
+              "Loaded template from Google Sheet.",
+              "success"
+            );
+          } else {
+            const activeLocalTemplate = templates.getActiveTemplate();
+            if (activeLocalTemplate)
+              buildAnnotationFormFromTemplateRef(activeLocalTemplate);
+            document.dispatchEvent(
+              new CustomEvent("sheetTemplateActive", {
+                detail: { active: true, hasTemplate: false },
+              })
+            );
+            ui.showToastNotification(
+              "Could not load sheet template, using local fallback.",
+              "warning"
+            );
+          }
+        } else {
+          const activeLocalTemplate = templates.getActiveTemplate();
+          if (activeLocalTemplate && buildAnnotationFormFromTemplateRef) {
+            buildAnnotationFormFromTemplateRef(activeLocalTemplate);
+          }
+          document.dispatchEvent(
+            new CustomEvent("sheetTemplateActive", {
+              detail: { active: true, hasTemplate: false },
+            })
+          );
+        }
+
         const datasets = await api.getDatasets();
         dom.datasetSelector.innerHTML =
           '<option value="">Select Dataset</option>';
@@ -249,6 +305,7 @@ export function initializeActions(_state) {
           dom.datasetSelector.appendChild(option);
         });
         dom.datasetSelector.disabled = false;
+
         const lastDataset = localStorage.getItem(
           `currentDataset_${selectedSheetId}`
         );
@@ -261,6 +318,11 @@ export function initializeActions(_state) {
         alert(`Failed to connect to sheet: ${error.message}`);
         e.target.value = "";
         state.currentSheetId = null;
+        document.dispatchEvent(
+          new CustomEvent("sheetTemplateActive", {
+            detail: { active: false, hasTemplate: false },
+          })
+        );
       } finally {
         ui.hideLoading();
       }
@@ -274,12 +336,10 @@ export function initializeActions(_state) {
         `currentDataset_${state.currentSheetId}`,
         selectedDataset
       );
-
       const filterStatus = await api.getFilterStatus(selectedDataset);
       document.dispatchEvent(
         new CustomEvent("updateFilterUI", { detail: filterStatus })
       );
-
       ui.showLoading("Loading Session...", "Checking for resumable papers...");
       try {
         const annotatorName = localStorage.getItem("annotatorName");
@@ -363,11 +423,9 @@ export function initializeActions(_state) {
         if (!field.autoFillRules || field.autoFillRules.length === 0) return;
         const triggerEl = document.getElementById(field.id);
         if (!triggerEl) return;
-
         triggerEl.addEventListener("change", (e) => {
           const triggerId = e.target.id;
           const currentValue = e.target.value;
-
           document
             .querySelectorAll(`[data-autofilled-by="${triggerId}"]`)
             .forEach((fieldToReset) => {
@@ -380,7 +438,6 @@ export function initializeActions(_state) {
                 resetField(fieldToReset);
               }
             });
-
           field.autoFillRules.forEach((rule) => {
             if (currentValue === rule.triggerValue.toString()) {
               applyAutoFillRule(rule, triggerId);
@@ -390,4 +447,6 @@ export function initializeActions(_state) {
       });
     },
   };
+
+  return actionsApi;
 }

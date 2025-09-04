@@ -1,11 +1,12 @@
 // static/scripts/templates.js
 import * as api from "./api.js";
-import { showToastNotification } from "./ui.js";
+import { showToastNotification, setButtonLoading } from "./ui.js";
 
 let templates = [];
 let activeTemplateName = null;
 let currentTemplateData = null;
 let onTemplateChangeCallback = null;
+let state = {};
 
 const templateSelector = document.getElementById("template-selector");
 const templateBuilderContainer = document.getElementById(
@@ -14,6 +15,7 @@ const templateBuilderContainer = document.getElementById(
 const newTemplateBtn = document.getElementById("new-template-btn");
 const deleteTemplateBtn = document.getElementById("delete-template-btn");
 const saveTemplateBtn = document.getElementById("save-template-btn");
+const saveToSheetBtn = document.getElementById("save-template-to-sheet-btn");
 const addFieldBtn = document.getElementById("add-field-btn");
 const openTemplatesFolderBtn = document.getElementById(
   "open-templates-folder-btn"
@@ -22,10 +24,54 @@ const uploadTemplateBtn = document.getElementById("upload-template-btn");
 const templateFileInput = document.getElementById("template-file-input");
 const refreshTemplatesBtn = document.getElementById("refresh-templates-btn");
 
-export async function initTemplateManager(callback) {
+const sheetTemplateStatus = document.getElementById("sheet-template-status");
+
+function loadSheetTemplateIntoEditor(templateData) {
+  if (!templateData) return;
+  currentTemplateData = templateData;
+  activeTemplateName = "sheet-template"; // Use a placeholder name
+  renderTemplateEditor();
+}
+
+export async function initTemplateManager(callback, _state) {
   onTemplateChangeCallback = callback;
+  state = _state;
   await loadTemplates();
   setupEventListeners();
+
+  document.addEventListener("sheetTemplateActive", (e) => {
+    const { active, hasTemplate } = e.detail;
+
+    saveToSheetBtn.classList.toggle("hidden", !active);
+    templateBuilderContainer.classList.remove("disabled-ui");
+    addFieldBtn.disabled = false;
+
+    if (hasTemplate) {
+      sheetTemplateStatus.innerHTML = `<p class="text-blue-200">The annotation template is currently being managed by the connected Google Sheet.</p>`;
+      sheetTemplateStatus.classList.remove("hidden");
+      saveTemplateBtn.textContent = "Save as Local Copy";
+      templateSelector.disabled = true;
+      newTemplateBtn.disabled = true;
+      deleteTemplateBtn.disabled = true;
+    } else if (active) {
+      sheetTemplateStatus.innerHTML = `<p class="text-yellow-200">No template found on this sheet. You can save your active local template to the sheet to get started.</p>`;
+      sheetTemplateStatus.classList.remove("hidden");
+      saveTemplateBtn.textContent = "Save Template";
+      templateSelector.disabled = false;
+      newTemplateBtn.disabled = false;
+      deleteTemplateBtn.disabled = false;
+    } else {
+      sheetTemplateStatus.classList.add("hidden");
+      saveTemplateBtn.textContent = "Save Template";
+      templateSelector.disabled = false;
+      newTemplateBtn.disabled = false;
+      deleteTemplateBtn.disabled = false;
+    }
+  });
+
+  document.addEventListener("loadSheetTemplate", (e) => {
+    loadSheetTemplateIntoEditor(e.detail);
+  });
 }
 
 function setupEventListeners() {
@@ -43,27 +89,22 @@ function setupEventListeners() {
 
   newTemplateBtn.addEventListener("click", createNewTemplate);
   deleteTemplateBtn.addEventListener("click", deleteSelectedTemplate);
-  saveTemplateBtn.addEventListener("click", saveCurrentTemplate);
+  saveTemplateBtn.addEventListener("click", saveCurrentLocalTemplate);
+  saveToSheetBtn.addEventListener("click", saveCurrentTemplateToSheet);
 
   addFieldBtn.addEventListener("click", () => {
     const newIndex =
       templateBuilderContainer.querySelectorAll(".field-editor").length;
-    // We need the current list of fields to populate the target dropdown
     const allFields = readAllFieldsFromDOM();
     const newFieldElement = renderFieldEditor(null, newIndex, allFields);
     templateBuilderContainer.appendChild(newFieldElement);
   });
 
   openTemplatesFolderBtn.addEventListener("click", api.openTemplatesFolder);
-
-  uploadTemplateBtn.addEventListener("click", () => {
-    templateFileInput.click();
-  });
-
+  uploadTemplateBtn.addEventListener("click", () => templateFileInput.click());
   templateFileInput.addEventListener("change", async (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
     try {
       await api.uploadTemplate(file);
       showToastNotification(
@@ -79,21 +120,33 @@ function setupEventListeners() {
       templateFileInput.value = "";
     }
   });
-
   refreshTemplatesBtn.addEventListener("click", async () => {
     showToastNotification("Refreshing template list...", "info");
     await loadTemplates();
-    templateSelector.dispatchEvent(new Event("change"));
   });
 }
 
 async function loadTemplates() {
+  const isSheetTemplateActive = templateSelector.disabled;
+
   try {
     templates = await api.getTemplates();
+    const currentLocalSelection = templateSelector.value;
     templateSelector.innerHTML = "";
+
     if (templates.length === 0) {
       templateSelector.innerHTML =
-        '<option value="">No templates found</option>';
+        '<option value="">No local templates</option>';
+      if (!isSheetTemplateActive) {
+        currentTemplateData = {
+          name: "new-template",
+          description: "A new annotation template.",
+          fields: [],
+        };
+        if (onTemplateChangeCallback)
+          onTemplateChangeCallback(currentTemplateData);
+        renderTemplateEditor();
+      }
       return;
     }
 
@@ -104,14 +157,26 @@ async function loadTemplates() {
       templateSelector.appendChild(option);
     });
 
-    activeTemplateName = localStorage.getItem("activeTemplate") || templates[0];
-    if (templates.includes(activeTemplateName)) {
-      templateSelector.value = activeTemplateName;
-    } else {
-      activeTemplateName = templates[0];
-      localStorage.setItem("activeTemplate", activeTemplateName);
+    if (isSheetTemplateActive) {
+      if (templates.includes(currentLocalSelection)) {
+        templateSelector.value = currentLocalSelection;
+      }
+      return; // Exit early to prevent overriding the editor
     }
-    await loadTemplateForEditing(activeTemplateName);
+
+    let templateToSelect =
+      localStorage.getItem("activeTemplate") || templates[0];
+    if (!templates.includes(templateToSelect)) {
+      templateToSelect = templates[0];
+      localStorage.setItem("activeTemplate", templateToSelect);
+    }
+
+    if (templateSelector.value !== templateToSelect) {
+      templateSelector.value = templateToSelect;
+      templateSelector.dispatchEvent(new Event("change"));
+    } else {
+      await loadTemplateForEditing(templateToSelect);
+    }
   } catch (error) {
     showToastNotification("Error loading templates: " + error.message, "error");
   }
@@ -132,9 +197,7 @@ async function loadTemplateForEditing(templateName) {
 function renderTemplateEditor() {
   templateBuilderContainer.innerHTML = "";
   if (!currentTemplateData || !currentTemplateData.fields) return;
-
   const allFields = currentTemplateData.fields;
-
   allFields.forEach((field, index) => {
     const fieldElement = renderFieldEditor(field, index, allFields);
     templateBuilderContainer.appendChild(fieldElement);
@@ -142,13 +205,7 @@ function renderTemplateEditor() {
 }
 
 function renderSingleRuleEditor(rule, allFields, triggerFieldId) {
-  const ruleData = rule || {
-    triggerValue: "",
-    targetId: "",
-    targetValue: "",
-  };
-
-  // Create options for the target ID select, excluding the trigger field itself
+  const ruleData = rule || { triggerValue: "", targetId: "", targetValue: "" };
   const targetOptionsHTML = allFields
     .filter((f) => f.id !== triggerFieldId)
     .map(
@@ -158,33 +215,17 @@ function renderSingleRuleEditor(rule, allFields, triggerFieldId) {
         }>${f.label || f.id}</option>`
     )
     .join("");
-
   const ruleWrapper = document.createElement("div");
   ruleWrapper.className =
     "autofill-rule-editor grid grid-cols-1 md:grid-cols-4 gap-2 items-end bg-black bg-opacity-20 p-2 rounded-lg";
   ruleWrapper.innerHTML = `
-        <div class="md:col-span-1">
-            <label class="text-xs font-medium">When value is...</label>
-            <input type="text" value="${ruleData.triggerValue}" class="w-full p-1 bg-white bg-opacity-10 rounded text-white text-xs rule-trigger-value" placeholder="e.g., true or Review">
-        </div>
-        <div class="md:col-span-1">
-            <label class="text-xs font-medium">...then set field...</label>
-            <select class="custom-select w-full p-1 bg-white bg-opacity-10 rounded text-white text-xs rule-target-id">
-                <option value="">-- Select Target --</option>
-                ${targetOptionsHTML}
-            </select>
-        </div>
-        <div class="md:col-span-1">
-            <label class="text-xs font-medium">...to value...</label>
-            <input type="text" value="${ruleData.targetValue}" class="w-full p-1 bg-white bg-opacity-10 rounded text-white text-xs rule-target-value" placeholder="e.g., false or Irrelevant">
-        </div>
-        <button type="button" class="delete-rule-btn p-1 rounded glass-hover text-red-400 self-center justify-self-end">Delete Rule</button>
-    `;
-
+        <div class="md:col-span-1"><label class="text-xs font-medium">When value is...</label><input type="text" value="${ruleData.triggerValue}" class="w-full p-1 bg-white bg-opacity-10 rounded text-white text-xs rule-trigger-value" placeholder="e.g., true or Review"></div>
+        <div class="md:col-span-1"><label class="text-xs font-medium">...then set field...</label><select class="custom-select w-full p-1 bg-white bg-opacity-10 rounded text-white text-xs rule-target-id"><option value="">-- Select Target --</option>${targetOptionsHTML}</select></div>
+        <div class="md:col-span-1"><label class="text-xs font-medium">...to value...</label><input type="text" value="${ruleData.targetValue}" class="w-full p-1 bg-white bg-opacity-10 rounded text-white text-xs rule-target-value" placeholder="e.g., false or Irrelevant"></div>
+        <button type="button" class="delete-rule-btn p-1 rounded glass-hover text-red-400 self-center justify-self-end">Delete Rule</button>`;
   ruleWrapper
     .querySelector(".delete-rule-btn")
     .addEventListener("click", () => ruleWrapper.remove());
-
   return ruleWrapper;
 }
 
@@ -199,96 +240,47 @@ function renderFieldEditor(field, index, allFields) {
     ai_summary_field: "context",
     autoFillRules: [],
   };
-
   const fieldWrapper = document.createElement("div");
   fieldWrapper.className = "glass-effect rounded-xl p-4 space-y-3 field-editor";
   fieldWrapper.dataset.index = index;
-
   const optionsHTML =
     fieldData.type === "select"
-      ? `
-        <div class="field-options-container md:col-span-2">
-            <label class="text-sm font-medium">Options (one per line)</label>
-            <textarea class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-options-textarea" rows="3">${fieldData.options.join(
-              "\n"
-            )}</textarea>
-        </div>
-    `
+      ? `<div class="field-options-container md:col-span-2"><label class="text-sm font-medium">Options (one per line)</label><textarea class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-options-textarea" rows="3">${fieldData.options.join(
+          "\n"
+        )}</textarea></div>`
       : "";
-
   fieldWrapper.innerHTML = `
-        <div class="flex justify-between items-center">
-            <span class="font-bold text-lg">Field #${index + 1}</span>
-            <div>
-                <button type="button" class="move-field-up-btn p-1 rounded-full glass-hover" title="Move Up">▲</button>
-                <button type="button" class="move-field-down-btn p-1 rounded-full glass-hover" title="Move Down">▼</button>
-                <button type="button" class="delete-field-btn p-1 rounded-full glass-hover text-red-400" title="Delete Field">✖</button>
-            </div>
-        </div>
+        <div class="flex justify-between items-center"><span class="font-bold text-lg">Field #${
+          index + 1
+        }</span><div><button type="button" class="move-field-up-btn p-1 rounded-full glass-hover" title="Move Up">▲</button><button type="button" class="move-field-down-btn p-1 rounded-full glass-hover" title="Move Down">▼</button><button type="button" class="delete-field-btn p-1 rounded-full glass-hover text-red-400" title="Delete Field">✖</button></div></div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-                <label class="text-sm font-medium">Label</label>
-                <input type="text" value="${
-                  fieldData.label
-                }" class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-label-input" placeholder="e.g., Is Experimental?">
-            </div>
-            <div>
-                <label class="text-sm font-medium">ID</label>
-                <input type="text" value="${
-                  fieldData.id
-                }" class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-id-input" placeholder="e.g., trigger_experimental">
-            </div>
-            <div>
-                <label class="text-sm font-medium">Type</label>
-                <select class="custom-select w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-type-selector">
-                    <option value="boolean" ${
-                      fieldData.type === "boolean" ? "selected" : ""
-                    }>Boolean (Toggle)</option>
-                    <option value="select" ${
-                      fieldData.type === "select" ? "selected" : ""
-                    }>Select (Dropdown)</option>
-                </select>
-            </div>
+            <div><label class="text-sm font-medium">Label</label><input type="text" value="${
+              fieldData.label
+            }" class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-label-input" placeholder="e.g., Is Experimental?"></div>
+            <div><label class="text-sm font-medium">ID</label><input type="text" value="${
+              fieldData.id
+            }" class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-id-input" placeholder="e.g., trigger_experimental"></div>
+            <div><label class="text-sm font-medium">Type</label><select class="custom-select w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-type-selector"><option value="boolean" ${
+              fieldData.type === "boolean" ? "selected" : ""
+            }>Boolean (Toggle)</option><option value="select" ${
+    fieldData.type === "select" ? "selected" : ""
+  }>Select (Dropdown)</option></select></div>
             ${optionsHTML}
-            <div>
-                <label class="text-sm font-medium">AI Summary Field</label>
-                <select class="custom-select w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-ai-summary-selector">
-                    <option value="context" ${
-                      (fieldData.ai_summary_field || "context") === "context"
-                        ? "selected"
-                        : ""
-                    }>Context (Direct Quote)</option>
-                    <option value="reasoning" ${
-                      fieldData.ai_summary_field === "reasoning"
-                        ? "selected"
-                        : ""
-                    }>Reasoning (Explanation)</option>
-                </select>
-            </div>
-            <div class="md:col-span-2">
-                <label class="text-sm font-medium">Keywords (comma-separated)</label>
-                <textarea class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-keywords-textarea" rows="2" placeholder="e.g., experiment, rct, control group">${fieldData.keywords.join(
-                  ", "
-                )}</textarea>
-            </div>
-            <div class="md:col-span-2">
-                <label class="text-sm font-medium">AI Prompt Description</label>
-                <textarea class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-description-textarea" rows="3" placeholder="Instructions for the AI on how to classify this field.">${
-                  fieldData.description
-                }</textarea>
-            </div>
+            <div><label class="text-sm font-medium">AI Summary Field</label><select class="custom-select w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-ai-summary-selector"><option value="context" ${
+              (fieldData.ai_summary_field || "context") === "context"
+                ? "selected"
+                : ""
+            }>Context (Direct Quote)</option><option value="reasoning" ${
+    fieldData.ai_summary_field === "reasoning" ? "selected" : ""
+  }>Reasoning (Explanation)</option></select></div>
+            <div class="md:col-span-2"><label class="text-sm font-medium">Keywords (comma-separated)</label><textarea class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-keywords-textarea" rows="2" placeholder="e.g., experiment, rct, control group">${fieldData.keywords.join(
+              ", "
+            )}</textarea></div>
+            <div class="md:col-span-2"><label class="text-sm font-medium">AI Prompt Description</label><textarea class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-description-textarea" rows="3" placeholder="Instructions for the AI on how to classify this field.">${
+              fieldData.description
+            }</textarea></div>
         </div>
-        <!-- Auto-fill rules section -->
-        <div class="pt-3 mt-3 border-t border-white/10">
-            <h4 class="text-md font-semibold mb-2">Automatic Fill-in Rules</h4>
-            <div class="autofill-rules-container space-y-2">
-                <!-- JS will populate this -->
-            </div>
-            <button type="button" class="add-autofill-rule-btn btn-primary text-sm px-3 py-1 mt-2">Add Rule</button>
-        </div>
-    `;
-
-  // Populate auto-fill rules
+        <div class="pt-3 mt-3 border-t border-white/10"><h4 class="text-md font-semibold mb-2">Automatic Fill-in Rules</h4><div class="autofill-rules-container space-y-2"></div><button type="button" class="add-autofill-rule-btn btn-primary text-sm px-3 py-1 mt-2">Add Rule</button></div>`;
   const rulesContainer = fieldWrapper.querySelector(
     ".autofill-rules-container"
   );
@@ -298,8 +290,6 @@ function renderFieldEditor(field, index, allFields) {
       rulesContainer.appendChild(ruleEditor);
     });
   }
-
-  // Add event listener for adding new rules
   fieldWrapper
     .querySelector(".add-autofill-rule-btn")
     .addEventListener("click", (e) => {
@@ -312,11 +302,9 @@ function renderFieldEditor(field, index, allFields) {
       );
       e.target.previousElementSibling.appendChild(newRuleEditor);
     });
-
   fieldWrapper
     .querySelector(".delete-field-btn")
     .addEventListener("click", () => fieldWrapper.remove());
-
   fieldWrapper
     .querySelector(".field-type-selector")
     .addEventListener("change", (e) => {
@@ -334,7 +322,6 @@ function renderFieldEditor(field, index, allFields) {
       );
       parent.replaceWith(newEditor);
     });
-
   fieldWrapper
     .querySelector(".move-field-up-btn")
     .addEventListener("click", () => {
@@ -355,7 +342,6 @@ function renderFieldEditor(field, index, allFields) {
         );
       }
     });
-
   return fieldWrapper;
 }
 
@@ -375,9 +361,7 @@ function readFieldDataFromDOM(fieldEditorDiv) {
       .split(separator)
       .map((s) => s.trim())
       .filter(Boolean);
-
   const type = getVal(".field-type-selector");
-
   const autoFillRules = [];
   fieldEditorDiv
     .querySelectorAll(".autofill-rule-editor")
@@ -391,8 +375,7 @@ function readFieldDataFromDOM(fieldEditorDiv) {
         autoFillRules.push({ triggerValue, targetId, targetValue });
       }
     });
-
-  const fieldData = {
+  return {
     label: getVal(".field-label-input"),
     id: getVal(".field-id-input"),
     type: type,
@@ -402,28 +385,109 @@ function readFieldDataFromDOM(fieldEditorDiv) {
     ai_summary_field: getVal(".field-ai-summary-selector") || "context",
     autoFillRules: autoFillRules,
   };
-  return fieldData;
 }
 
-async function saveCurrentTemplate() {
+async function saveCurrentLocalTemplate() {
   const newFields = readAllFieldsFromDOM();
+  const isSheetTemplateActive = templateSelector.disabled;
+
+  let finalTemplateName;
+  let isNewLocalCopy = false;
+
+  if (isSheetTemplateActive) {
+    isNewLocalCopy = true;
+    const newName = prompt(
+      "Enter a new name for this local template copy (e.g., 'my-custom-version'):"
+    );
+    if (!newName || !/^[a-zA-Z0-9_-]+$/.test(newName)) {
+      if (newName !== null)
+        alert(
+          "Invalid name. Use only letters, numbers, underscores, and hyphens."
+        );
+      return;
+    }
+    finalTemplateName = `${newName}.json`;
+  } else {
+    finalTemplateName = templateSelector.value;
+    if (!finalTemplateName) {
+      showToastNotification("Cannot save. No template selected.", "error");
+      return;
+    }
+  }
 
   const updatedTemplate = {
-    name: currentTemplateData.name,
-    description: currentTemplateData.description,
+    name: finalTemplateName.replace(".json", ""),
+    description: currentTemplateData.description || "Custom template.",
     fields: newFields,
   };
 
+  setButtonLoading(saveTemplateBtn, true, "Saving...");
   try {
-    await api.saveTemplate(activeTemplateName, updatedTemplate);
-    showToastNotification("Template saved successfully!", "success");
-    currentTemplateData = updatedTemplate; // Update local state
+    await api.saveTemplate(finalTemplateName, updatedTemplate);
+    showToastNotification(
+      `Template saved locally as '${finalTemplateName}'!`,
+      "success"
+    );
 
-    if (onTemplateChangeCallback) {
-      onTemplateChangeCallback(currentTemplateData);
+    await loadTemplates();
+
+    if (isNewLocalCopy) {
+      document.dispatchEvent(
+        new CustomEvent("sheetTemplateActive", {
+          detail: { active: false, hasTemplate: false },
+        })
+      );
+      templateSelector.value = finalTemplateName;
+      templateSelector.dispatchEvent(new Event("change"));
+    } else {
+      if (onTemplateChangeCallback) {
+        onTemplateChangeCallback(updatedTemplate);
+      }
+      await loadTemplateForEditing(finalTemplateName);
     }
   } catch (error) {
     showToastNotification("Error saving template: " + error.message, "error");
+  } finally {
+    const buttonText = isSheetTemplateActive
+      ? "Save Template"
+      : saveTemplateBtn.textContent;
+    setButtonLoading(saveTemplateBtn, false, buttonText);
+  }
+}
+
+async function saveCurrentTemplateToSheet() {
+  if (!state.currentSheetId) {
+    showToastNotification("No active Google Sheet selected.", "error");
+    return;
+  }
+  const newFields = readAllFieldsFromDOM();
+  const updatedTemplate = {
+    ...currentTemplateData,
+    fields: newFields,
+    name: currentTemplateData.name || "sheet-template",
+    description:
+      currentTemplateData.description || "Template managed by Google Sheet.",
+  };
+  setButtonLoading(saveToSheetBtn, true, "Saving...");
+  try {
+    await api.saveTemplateToSheet(state.currentSheetId, updatedTemplate);
+    showToastNotification(
+      "Template successfully saved to Google Sheet!",
+      "success"
+    );
+    currentTemplateData = updatedTemplate;
+    if (onTemplateChangeCallback) {
+      onTemplateChangeCallback(currentTemplateData);
+    }
+    document.dispatchEvent(
+      new CustomEvent("sheetTemplateActive", {
+        detail: { active: true, hasTemplate: true },
+      })
+    );
+  } catch (error) {
+    showToastNotification(`Error: ${error.message}`, "error");
+  } finally {
+    setButtonLoading(saveToSheetBtn, false, "Save to Sheet");
   }
 }
 
@@ -434,50 +498,47 @@ async function createNewTemplate() {
     return;
   }
   const filename = `${name}.json`;
-
   if (templates.includes(filename)) {
     alert("A template with this name already exists.");
     return;
   }
-
   const newTemplate = {
     name: name,
     description: "A new annotation template.",
     fields: [],
   };
-
   try {
     await api.saveTemplate(filename, newTemplate);
     showToastNotification("New template created.", "success");
-    await loadTemplates(); // Refresh the list
+    await loadTemplates();
     templateSelector.value = filename;
     templateSelector.dispatchEvent(new Event("change"));
   } catch (error) {
     showToastNotification(
-      "Error creating new template: " + error.message,
+      `Error creating new template: ${error.message}`,
       "error"
     );
   }
 }
 
 async function deleteSelectedTemplate() {
+  const selectedTemplate = templateSelector.value;
   if (templates.length <= 1) {
     alert("Cannot delete the last template.");
     return;
   }
   if (
     !confirm(
-      `Are you sure you want to delete the template '${activeTemplateName}'? This cannot be undone.`
+      `Are you sure you want to delete the template '${selectedTemplate}'? This cannot be undone.`
     )
   ) {
     return;
   }
-
   try {
-    await api.deleteTemplate(activeTemplateName);
+    await api.deleteTemplate(selectedTemplate);
     showToastNotification("Template deleted.", "success");
     localStorage.removeItem("activeTemplate");
-    await loadTemplates(); // Refresh list and load the new default
+    await loadTemplates();
     templateSelector.dispatchEvent(new Event("change"));
   } catch (error) {
     showToastNotification("Error deleting template: " + error.message, "error");

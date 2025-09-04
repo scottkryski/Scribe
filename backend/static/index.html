@@ -29,6 +29,14 @@
     </div>
 
     <div id="main-view" class="hidden">
+        <!-- FIX START: New banner for template updates -->
+        <div id="template-update-banner" class="hidden bg-blue-600 text-white p-3 text-center fade-in">
+            <span class="font-semibold">The shared annotation template has been updated!</span>
+            <button id="update-template-now-btn" class="ml-4 bg-white text-blue-700 font-bold py-1 px-4 rounded-full hover:bg-blue-100 transition-colors">
+                Update Now
+            </button>
+        </div>
+        <!-- FIX END -->
         <div id="update-notification-banner" class="hidden bg-indigo-600 text-white p-3 text-center fade-in">
             <span class="font-semibold">A new version of Scribe is available!</span>
             <button id="update-now-banner-btn" class="ml-4 bg-white text-indigo-700 font-bold py-1 px-4 rounded-full hover:bg-indigo-100 transition-colors">
@@ -327,29 +335,39 @@
                         <svg class="accordion-icon w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                     </button>
                     <div class="settings-accordion-content">
+                        <div id="sheet-template-status" class="hidden text-center bg-blue-900/50 p-3 rounded-lg border border-blue-500/50 mb-4">
+                            <!-- JS will populate this message -->
+                        </div>
+                        
                         <div class="space-y-6">
-                            <!-- Template Selection & Management -->
-                            <div class="grid grid-cols-1 md:grid-cols-3 items-center gap-4">
-                                <label for="template-selector" class="font-medium">Active Template:</label>
-                                <div class="md:col-span-2 flex items-center gap-2">
-                                    <select id="template-selector" class="flex-grow custom-select p-2 bg-white bg-opacity-20 rounded-lg text-white">
-                                        <option value="">-- Loading templates... --</option>
-                                    </select>
-                                    <button id="new-template-btn" type="button" class="btn-primary" title="New Template">+</button>
-                                    <button id="delete-template-btn" type="button" class="btn-primary bg-red-600 hover:bg-red-700" title="Delete Template">🗑️</button>
-                                    <button id="refresh-templates-btn" type="button" class="btn-primary bg-indigo-600 hover:bg-indigo-700" title="Refresh List">🔄</button>
+                            <!-- MODIFIED: Wrapped local management controls in a new div -->
+                            <div id="local-template-management">
+                                <div class="grid grid-cols-1 md:grid-cols-3 items-center gap-4">
+                                    <label for="template-selector" class="font-medium">Active Template:</label>
+                                    <div class="md:col-span-2 flex items-center gap-2">
+                                        <select id="template-selector" class="flex-grow custom-select p-2 bg-white bg-opacity-20 rounded-lg text-white">
+                                            <option value="">-- Loading templates... --</option>
+                                        </select>
+                                        <button id="new-template-btn" type="button" class="btn-primary" title="New Template">+</button>
+                                        <button id="delete-template-btn" type="button" class="btn-primary bg-red-600 hover:bg-red-700" title="Delete Template">🗑️</button>
+                                        <button id="refresh-templates-btn" type="button" class="btn-primary bg-indigo-600 hover:bg-indigo-700" title="Refresh List">🔄</button>
+                                    </div>
                                 </div>
                             </div>
-                            <!-- Template Builder -->
+                            
+                            <!-- Template Builder is now outside the wrapper so it's always visible -->
                             <div id="template-builder-container" class="space-y-4 pt-4 border-t border-white/10">
                                 <!-- JS will populate this -->
                             </div>
+                            
                             <!-- Action Buttons -->
                             <div class="flex justify-end items-center gap-4 pt-4 border-t border-white/10">
                                 <button id="open-templates-folder-btn" type="button" class="btn-primary mr-auto">Open Folder</button>
                                 <button id="upload-template-btn" type="button" class="btn-primary bg-indigo-600 hover:bg-indigo-700">Upload</button>
                                 <input type="file" id="template-file-input" class="hidden" accept=".json">
                                 <button id="add-field-btn" type="button" class="btn-primary">Add Field</button>
+                                
+                                <button id="save-template-to-sheet-btn" type="button" class="hidden btn-primary bg-blue-600 hover:bg-blue-700">Save to Sheet</button>
                                 <button id="save-template-btn" type="button" class="btn-primary bg-green-600 hover:bg-green-700">Save Template</button>
                             </div>
                         </div>

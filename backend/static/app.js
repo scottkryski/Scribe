@@ -28,7 +28,6 @@ async function waitForServerReady() {
   });
 }
 
-// --- FIX START: New function to check for updates on startup ---
 async function checkForUpdatesOnLoad() {
   try {
     const updateStatus = await api.checkForUpdates();
@@ -46,7 +45,37 @@ async function checkForUpdatesOnLoad() {
     console.warn("Could not check for updates on startup:", error);
   }
 }
-// --- FIX END ---
+
+let templatePollInterval = null;
+
+async function checkTemplateForUpdates() {
+  if (!state.currentSheetId || !state.sheetTemplateTimestamp) {
+    return;
+  }
+  const status = await api.getSheetTemplateStatus(state.currentSheetId);
+  const banner = document.getElementById("template-update-banner");
+
+  if (status && status.last_updated > state.sheetTemplateTimestamp) {
+    banner.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
+  }
+}
+
+function startTemplatePolling() {
+  stopTemplatePolling(); // Ensure no multiple intervals are running
+  if (state.sheetTemplateTimestamp) {
+    templatePollInterval = setInterval(checkTemplateForUpdates, 30000); // Check every 30 seconds
+  }
+}
+
+function stopTemplatePolling() {
+  if (templatePollInterval) {
+    clearInterval(templatePollInterval);
+    templatePollInterval = null;
+  }
+  document.getElementById("template-update-banner").classList.add("hidden");
+}
 
 document.addEventListener("DOMContentLoaded", () => {
   dom.init();
@@ -64,19 +93,16 @@ document.addEventListener("DOMContentLoaded", () => {
     lockTimerInterval: null,
     isAppInitialized: false,
     currentFilterQuery: "",
+    sheetTemplateTimestamp: null,
   };
 
   // --- Module Initialization ---
   const actions = initializeActions(state);
   initializeLockTimer(state);
 
-  // The viewManager needs a way to tell the dashboard to reload, and the dashboard needs a way to tell the viewManager to switch views.
-  // We pass a simplified object to the dashboard so it can call back to the viewManager.
-  // Then we pass the fully initialized dashboard to the viewManager.
   let viewManager;
   const dashboard = initializeDashboard(state, {
     showAnnotationViewWithPaper: async (paper) => {
-      // This function will be called from the dashboard to switch views
       if (viewManager) {
         await viewManager.showAnnotationViewWithPaper(paper);
       }
@@ -89,6 +115,10 @@ document.addEventListener("DOMContentLoaded", () => {
     viewManager,
     buildAnnotationFormFromTemplate
   );
+
+  if (actions.setBuildFormCallback) {
+    actions.setBuildFormCallback(buildAnnotationFormFromTemplate);
+  }
 
   function generateAndApplyHighlightStyles(template) {
     document.getElementById("dynamic-highlight-styles")?.remove();
@@ -191,8 +221,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function init() {
     await waitForServerReady();
-
-    // --- FIX: Call the update check function on startup ---
     checkForUpdatesOnLoad();
 
     viewManager.setupPanelResizing();
@@ -201,7 +229,10 @@ document.addEventListener("DOMContentLoaded", () => {
     ui.setupFieldActionControls();
 
     // --- Event Listeners ---
-    dom.sheetSelector.addEventListener("change", actions.handleSheetChange);
+    dom.sheetSelector.addEventListener("change", (e) => {
+      stopTemplatePolling(); // Stop polling when sheet changes
+      actions.handleSheetChange(e);
+    });
     dom.datasetSelector.addEventListener("change", actions.handleDatasetChange);
     dom.submitBtn.addEventListener("click", actions.submitAnnotation);
     dom.skipBtn.addEventListener("click", actions.handleSkip);
@@ -237,6 +268,48 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
     }
+
+    const updateTemplateBtn = document.getElementById(
+      "update-template-now-btn"
+    );
+    if (updateTemplateBtn) {
+      updateTemplateBtn.addEventListener("click", async () => {
+        if (!state.currentSheetId) return;
+        ui.showLoading("Updating Template...", "Fetching latest version...");
+        try {
+          const newTemplate = await api.getSheetTemplate(state.currentSheetId);
+          const newStatus = await api.getSheetTemplateStatus(
+            state.currentSheetId
+          );
+
+          if (newTemplate) {
+            buildAnnotationFormFromTemplate(newTemplate);
+            document.dispatchEvent(
+              new CustomEvent("loadSheetTemplate", { detail: newTemplate })
+            );
+            if (newStatus) {
+              state.sheetTemplateTimestamp = newStatus.last_updated;
+            }
+            document
+              .getElementById("template-update-banner")
+              .classList.add("hidden");
+            ui.showToastNotification(
+              "Annotation template updated successfully!",
+              "success"
+            );
+          }
+        } catch (error) {
+          ui.showToastNotification(
+            `Failed to update template: ${error.message}`,
+            "error"
+          );
+        } finally {
+          ui.hideLoading();
+        }
+      });
+    }
+
+    document.addEventListener("startTemplatePolling", startTemplatePolling);
 
     const setupComplete = await viewManager.runInitialSetupCheck();
     if (setupComplete) {

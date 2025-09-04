@@ -1,200 +1,187 @@
 # backend/routers/sheets.py
+import gspread
 import json
-import re
-from collections import Counter
 from fastapi import APIRouter, HTTPException
-from gspread.exceptions import APIError
-from pydantic import BaseModel
-from datetime import datetime, timezone
+from pydantic import BaseModel, Field
+from typing import Any, Dict
 
-from models import SheetUrlRequest, ConnectSheetRequest
 from app_state import state
+from models import ConnectSheetRequest, SheetUrlRequest
 from config import SHEETS_CONFIG_FILE
 
 router = APIRouter()
 
-# NEW: simple pantic model for posting comments
-class NewComment(BaseModel):
-    doi: str
-    comment: str
-    annotator: str
+class TemplateUpdateRequest(BaseModel):
+    template_data: Dict[str, Any] = Field(..., alias="templateData")
 
-def _read_sheets_config():
-    if not SHEETS_CONFIG_FILE.exists(): return []
-    with open(SHEETS_CONFIG_FILE, 'r') as f: return json.load(f)
+def _load_sheets_config():
+    if not SHEETS_CONFIG_FILE.exists():
+        return []
+    with open(SHEETS_CONFIG_FILE, 'r') as f:
+        return json.load(f)
 
-def _write_sheets_config(config):
-    with open(SHEETS_CONFIG_FILE, 'w') as f: json.dump(config, f, indent=2)
+def _save_sheets_config(config):
+    with open(SHEETS_CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
 
-def setup_sheet_columns(ws):
-    """
-    Checks for and adds required columns to the worksheet.
-    If the sheet is empty, it creates a default set of headers.
-    """
-    print("LOG: Setting up sheet columns...")
-    try:
-        headers = ws.row_values(1)
-    except APIError:
-        print("LOG: Sheet appears to be empty. Creating default headers.")
-        headers = []
-    except Exception as e:
-        print(f"An unexpected error occurred during sheet setup: {e}")
-        return
-
-    if not headers:
-        default_headers = [
-            'doi', 'title', 'dataset', 'annotator',
-            'lock_annotator', 'lock_timestamp'
-        ]
-        ws.update('A1', [default_headers])
-        print("LOG: Created default headers in the empty sheet.")
-        return
-
-    required_columns = ['dataset', 'lock_annotator', 'lock_timestamp']
-    for col_name in required_columns:
-        if col_name not in headers:
-            print(f"LOG: Column '{col_name}' not found. Adding it...")
-            ws.update_cell(1, len(headers) + 1, col_name)
-            headers.append(col_name)
-    
-    print("LOG: Sheet columns setup complete.")
-
-def ensure_comments_worksheet():
-    """
-    Ensure a 'Comments' worksheet exists in the connected spreadsheet.
-    Returns the gspread Worksheet instance.
-    """
-    if not state.worksheet:
-        raise HTTPException(status_code=400, detail="No Google Sheet connected.")
-    try:
-        ss = state.worksheet.spreadsheet
-        try:
-            ws = ss.worksheet("Comments")
-        except Exception:
-            ws = ss.add_worksheet(title="Comments", rows=1000, cols=4)
-            ws.update('A1:D1', [["doi", "annotator", "timestamp", "comment"]])
-        return ws
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to access/create Comments sheet: {e}")
-
-
-@router.get("/api/sheets")
-def get_sheets():
-    return _read_sheets_config()
+@router.get("/api/sheets", response_model=list)
+async def get_sheets():
+    return _load_sheets_config()
 
 @router.post("/api/sheets")
-def add_or_update_sheet(request: SheetUrlRequest):
-    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", request.url)
-    if not match:
-        raise HTTPException(status_code=400, detail="Invalid Google Sheet URL.")
-    
-    sheet_id = match.group(1)
-    sheet_config = {"name": request.name, "id": sheet_id}
-    config = _read_sheets_config()
-    
-    existing_sheet_index = next((i for i, sheet in enumerate(config) if sheet['name'] == request.name), None)
-    
-    if existing_sheet_index is not None:
-        config[existing_sheet_index] = sheet_config
-    else:
-        config.append(sheet_config)
-        
-    _write_sheets_config(config)
-    return {"status": "success", "message": "Sheet configuration saved."}
+async def add_sheet(request: SheetUrlRequest):
+    config = _load_sheets_config()
+    try:
+        if "spreadsheets/d/" in request.url:
+            sheet_id = request.url.split('spreadsheets/d/')[1].split('/')[0]
+        else:
+            raise ValueError("Invalid URL")
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid Google Sheet URL provided.")
 
+    if any(s['id'] == sheet_id for s in config):
+        raise HTTPException(status_code=409, detail="This sheet has already been added.")
+    
+    config.append({"id": sheet_id, "name": request.name})
+    _save_sheets_config(config)
+    return {"status": "success", "id": sheet_id}
 
 @router.delete("/api/sheets/{sheet_id}")
-def delete_sheet(sheet_id: str):
-    config = _read_sheets_config()
-    new_config = [s for s in config if s.get('id') != sheet_id]
+async def delete_sheet(sheet_id: str):
+    config = _load_sheets_config()
+    new_config = [s for s in config if s['id'] != sheet_id]
     if len(new_config) == len(config):
-        raise HTTPException(status_code=404, detail="Sheet ID not found.")
-    _write_sheets_config(new_config)
+        raise HTTPException(status_code=404, detail="Sheet configuration not found.")
+    _save_sheets_config(new_config)
     return {"status": "success"}
 
 @router.post("/connect-to-sheet")
-def connect_to_sheet(request: ConnectSheetRequest):
+async def connect_to_sheet(request: ConnectSheetRequest):
     if not state.gspread_client:
-        raise HTTPException(status_code=500, detail="gspread client not initialized.")
+        raise HTTPException(status_code=503, detail="Google Sheets client not initialized.")
+    
+    sheet_id = request.sheet_id
+    has_sheet_template = False
+    template_timestamp = None
+
     try:
-        sh = state.gspread_client.open_by_key(request.sheet_id)
-        state.worksheet = sh.sheet1
-        
-        setup_sheet_columns(state.worksheet)
+        spreadsheet = state.gspread_client.open_by_key(sheet_id)
+        state.worksheet = spreadsheet.sheet1
+        print(f"LOG: Successfully connected to sheet '{spreadsheet.title}'")
 
-        state.ANNOTATED_ITEMS.clear()
-        state.INCOMPLETE_ANNOTATIONS.clear()
-
-        all_records = state.worksheet.get_all_records()
-
-        if all_records:
-            # --- FIX START: Redefined "completeness" logic ---
-            # An annotation is complete if it has an annotator.
-            # It's incomplete if it has data but no annotator.
-            for i, rec in enumerate(all_records, start=2):
-                doi = rec.get('doi', '').strip()
-                if not doi: continue
-
-                is_complete = bool(rec.get('annotator', '').strip())
-                
-                if is_complete:
-                    state.ANNOTATED_ITEMS.add(doi)
+        try:
+            template_worksheet = spreadsheet.worksheet("_template")
+            template_json_str = template_worksheet.acell('A1').value
+            if template_json_str:
+                parsed_template = json.loads(template_json_str)
+                if 'fields' in parsed_template and isinstance(parsed_template['fields'], list):
+                    state.SHEET_TEMPLATES[sheet_id] = parsed_template
+                    has_sheet_template = True
+                    # --- FIX: Get the last updated time for the template worksheet ---
+                    template_timestamp = template_worksheet.updated_time
+                    print(f"LOG: Found and loaded a valid template from worksheet '_template' in sheet '{spreadsheet.title}'.")
                 else:
-                    # Check if it's more than just a placeholder before adding to incomplete
-                    other_values = [v for k, v in rec.items() if k not in ['doi', 'title', 'dataset', 'lock_annotator', 'lock_timestamp'] and v]
-                    if other_values:
-                         state.INCOMPLETE_ANNOTATIONS[doi] = {'data': rec, 'row_num': i}
-            # --- FIX END ---
-
-        return {"status": "success", "completed_count": len(state.ANNOTATED_ITEMS), "incomplete_count": len(state.INCOMPLETE_ANNOTATIONS)}
-    except APIError as e:
-        error_details = e.response.json().get('error', {}).get('message', 'Unknown API Error')
-        raise HTTPException(status_code=400, detail=f"Could not connect. Check Sheet ID and permissions. Error: {error_details}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
-
-@router.get("/get-sheet-stats")
-def get_sheet_stats():
-    if not state.worksheet:
-        return {"completed_count": 0, "incomplete_count": 0}
-    return {"completed_count": len(state.ANNOTATED_ITEMS), "incomplete_count": len(state.INCOMPLETE_ANNOTATIONS)}
-
-@router.get("/get-detailed-stats")
-def get_detailed_stats():
-    if not state.worksheet:
-        raise HTTPException(status_code=400, detail="No Google Sheet is currently connected.")
-    try:
-        records = state.worksheet.get_all_records()
-        if not records: return {"total_annotations": 0}
-        
-        headers = state.worksheet.row_values(1)
-        excluded = {'doi', 'title', 'dataset', 'annotator', 'lock_annotator', 'lock_timestamp'}
-        bool_fields = [h for h in headers if h and '_context' not in h and h not in excluded]
-
-        annotator_counts = Counter(r.get("annotator") for r in records if r.get("annotator"))
+                    print(f"WARN: Content in '_template' sheet is not a valid template format (missing 'fields' list).")
+            else:
+                 print(f"LOG: Found '_template' worksheet but cell A1 is empty.")
+        except gspread.WorksheetNotFound:
+            print(f"LOG: No '_template' worksheet found in sheet '{spreadsheet.title}'. Using local templates.")
+            if sheet_id in state.SHEET_TEMPLATES:
+                del state.SHEET_TEMPLATES[sheet_id]
+        except json.JSONDecodeError:
+            print(f"WARN: Could not parse JSON from '_template' worksheet cell A1.")
+        except Exception as e:
+            print(f"ERROR: An unexpected error occurred while loading sheet template: {e}")
 
         return {
-            "total_annotations": len(records),
-            "overall_counts": {f: dict(Counter(str(r.get(f, 'N/A')).upper() for r in records)) for f in bool_fields},
-            "doc_type_distribution": dict(Counter(r.get("attribute_docType") for r in records if r.get("attribute_docType"))),
-            "annotator_stats": dict(annotator_counts),
-            "dataset_stats": dict(Counter(r.get("dataset") for r in records if r.get("dataset"))),
-            "leaderboard": [{"annotator": a, "count": c} for a, c in annotator_counts.most_common()]
+            "message": "Successfully connected to sheet.",
+            "has_sheet_template": has_sheet_template,
+            "template_timestamp": template_timestamp
         }
+
+    except gspread.exceptions.SpreadsheetNotFound:
+        raise HTTPException(status_code=404, detail="Spreadsheet not found. Check the ID and permissions.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get detailed stats: {e}")
+        print(f"ERROR: Failed to connect to sheet: {e}")
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
-@router.get("/api/comments/{doi:path}")
-def list_comments(doi: str):
-    ws = ensure_comments_worksheet()
-    rows = ws.get_all_records()
-    items = [r for r in rows if str(r.get("doi","")).strip() == doi.strip()]
-    items.sort(key=lambda r: r.get("timestamp",""), reverse=True)
-    return {"items": items}
+# --- FIX START: New endpoint for checking template status ---
+@router.get("/api/sheets/{sheet_id}/template-status")
+async def get_sheet_template_status(sheet_id: str):
+    if not state.gspread_client:
+        raise HTTPException(status_code=503, detail="Google Sheets client not initialized.")
+    try:
+        spreadsheet = state.gspread_client.open_by_key(sheet_id)
+        template_worksheet = spreadsheet.worksheet("_template")
+        return {"last_updated": template_worksheet.updated_time}
+    except gspread.WorksheetNotFound:
+        raise HTTPException(status_code=404, detail="No template worksheet found for this sheet.")
+    except gspread.exceptions.SpreadsheetNotFound:
+        raise HTTPException(status_code=404, detail="Spreadsheet not found.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+# --- FIX END ---
 
-@router.post("/api/comments")
-def add_comment(payload: NewComment):
-    ws = ensure_comments_worksheet()
-    ts = datetime.now(timezone.utc).isoformat()
-    ws.append_row([payload.doi, payload.annotator, ts, payload.comment], value_input_option="RAW")
-    return {"ok": True, "timestamp": ts}
+@router.get("/api/sheets/{sheet_id}/template")
+async def get_sheet_template(sheet_id: str):
+    if sheet_id in state.SHEET_TEMPLATES:
+        return state.SHEET_TEMPLATES[sheet_id]
+    
+    # --- FIX: Add a fallback to fetch it live if not in cache ---
+    print(f"LOG: Template for sheet {sheet_id} not in cache, fetching live.")
+    if not state.gspread_client:
+        raise HTTPException(status_code=503, detail="Google Sheets client not initialized.")
+    try:
+        spreadsheet = state.gspread_client.open_by_key(sheet_id)
+        template_worksheet = spreadsheet.worksheet("_template")
+        template_json_str = template_worksheet.acell('A1').value
+        if template_json_str:
+            parsed_template = json.loads(template_json_str)
+            state.SHEET_TEMPLATES[sheet_id] = parsed_template
+            return parsed_template
+        else:
+            raise HTTPException(status_code=404, detail="Template worksheet is empty.")
+    except gspread.WorksheetNotFound:
+        raise HTTPException(status_code=404, detail="No template worksheet found for this sheet.")
+    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Failed to live-fetch template: {e}")
+
+
+@router.post("/api/sheets/{sheet_id}/template")
+async def save_sheet_template(sheet_id: str, request: TemplateUpdateRequest):
+    if not state.gspread_client:
+        raise HTTPException(status_code=503, detail="Google Sheets client not initialized.")
+
+    try:
+        spreadsheet = state.gspread_client.open_by_key(sheet_id)
+        
+        try:
+            template_worksheet = spreadsheet.worksheet("_template")
+        except gspread.WorksheetNotFound:
+            print("LOG: '_template' worksheet not found. Creating it now.")
+            template_worksheet = spreadsheet.add_worksheet(title="_template", rows=1, cols=1)
+
+        template_json_str = json.dumps(request.template_data, indent=4)
+        
+        template_worksheet.update_cell(1, 1, template_json_str)
+
+        state.SHEET_TEMPLATES[sheet_id] = request.template_data
+        
+        print(f"LOG: Successfully saved template to sheet '{spreadsheet.title}'.")
+        return {"status": "success", "message": "Template saved to Google Sheet successfully."}
+
+    except gspread.exceptions.SpreadsheetNotFound:
+        raise HTTPException(status_code=404, detail="Spreadsheet not found. Cannot save template.")
+    except gspread.exceptions.APIError as e:
+        error_details = "Unknown Google API Error"
+        try:
+            error_payload = json.loads(e.response.text)
+            error_details = error_payload.get("error", {}).get("message", e.response.text)
+        except (json.JSONDecodeError, AttributeError):
+            error_details = str(e)
+
+        print(f"ERROR: Google API error while saving template: {error_details}")
+        raise HTTPException(status_code=403, detail="Permission denied. The service account needs 'Editor' access to the Google Sheet to save templates.")
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred while saving sheet template: {e}")
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")

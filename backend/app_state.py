@@ -15,6 +15,7 @@ class AppState:
         self.ACTIVE_FILTERS: Dict[str, Dict[str, Any]] = {}
         self.ACTIVE_LOCKS: Dict[str, Dict[str, Any]] = {} 
         self.currentDataset: Optional[str] = None
+        self.SHEET_TEMPLATES: Dict[str, Any] = {}
 
 # Create a single, importable instance of the application state.
 state = AppState()
