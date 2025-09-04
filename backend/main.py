@@ -44,6 +44,10 @@ app.state.ready_event = asyncio.Event()
 app.state.startup_message = "Initializing..."
 app.state.startup_error = None
 
+PDF_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(exist_ok=True)
+TEMPLATES_DIR.mkdir(exist_ok=True)
+
 # --- Mount static files ---
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/pdfs", StaticFiles(directory=PDF_DIR), name="pdfs")
