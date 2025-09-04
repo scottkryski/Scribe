@@ -25,11 +25,9 @@ app = FastAPI(title="Scribe API")
 origins = ["null", "http://127.0.0.1:5500", "http://localhost:8080", "http://127.0.0.1:8000"]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-# --- FIX: Final Corrected CSP Middleware ---
 @app.middleware("http")
 async def add_csp_header(request: Request, call_next):
     response: Response = await call_next(request)
-    # This policy allows everything needed for the UI to function: Tailwind, Google Fonts, Tabulator, and inline scripts/styles.
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' https://cdn.tailwindcss.com https://unpkg.com 'unsafe-eval' 'unsafe-inline'; "
@@ -51,7 +49,6 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/pdfs", StaticFiles(directory=PDF_DIR), name="pdfs")
 
 # --- Include all the modular routers ---
-# No prefix is used to keep the API endpoints identical for the frontend
 app.include_router(ai.router)
 app.include_router(annotation.router)
 app.include_router(dataset.router)
@@ -59,7 +56,7 @@ app.include_router(pdf.router)
 app.include_router(sheets.router)
 app.include_router(system.router)
 app.include_router(templates.router)
-app.include_router(dashboard.router) # Include dashboard router
+app.include_router(dashboard.router)
 
 
 def run_startup_tasks():
@@ -85,7 +82,11 @@ def run_startup_tasks():
             shutil.copy(DEFAULT_TEMPLATE_FILE, TEMPLATES_DIR / "default.json")
 
         app.state.startup_message = "Authenticating with Google Services..."
-        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.file"]
+        # --- FIX: Add the drive.readonly scope to access file metadata ---
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.readonly"
+        ]
         state.gspread_client = gspread.service_account(filename=CREDS_FILE, scopes=scopes)
         
         app.state.startup_message = "Discovering local datasets..."

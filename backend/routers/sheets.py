@@ -77,8 +77,8 @@ async def connect_to_sheet(request: ConnectSheetRequest):
                 if 'fields' in parsed_template and isinstance(parsed_template['fields'], list):
                     state.SHEET_TEMPLATES[sheet_id] = parsed_template
                     has_sheet_template = True
-                    # --- FIX: Get the last updated time from the SPREADSHEET, not the worksheet ---
-                    template_timestamp = spreadsheet.updated
+                    # --- FIX: Use the correct attribute 'lastUpdateTime' ---
+                    template_timestamp = spreadsheet.lastUpdateTime
                     print(f"LOG: Found and loaded a valid template from worksheet '_template' in sheet '{spreadsheet.title}'.")
                 else:
                     print(f"WARN: Content in '_template' sheet is not a valid template format (missing 'fields' list).")
@@ -91,7 +91,6 @@ async def connect_to_sheet(request: ConnectSheetRequest):
         except json.JSONDecodeError:
             print(f"WARN: Could not parse JSON from '_template' worksheet cell A1.")
         except Exception as e:
-            # This is where the original error was logged
             print(f"ERROR: An unexpected error occurred while loading sheet template: {e}")
 
         return {
@@ -113,10 +112,9 @@ async def get_sheet_template_status(sheet_id: str):
     try:
         spreadsheet = state.gspread_client.open_by_key(sheet_id)
         spreadsheet.fetch_sheet_metadata() 
-        # --- FIX: Get the last updated time from the SPREADSHEET, not the worksheet ---
-        # Also ensure the _template sheet exists before returning a timestamp for it.
-        spreadsheet.worksheet("_template") # This will raise WorksheetNotFound if it doesn't exist
-        return {"last_updated": spreadsheet.updated}
+        spreadsheet.worksheet("_template")
+        # --- FIX: Use the correct attribute 'lastUpdateTime' ---
+        return {"last_updated": spreadsheet.lastUpdateTime}
     except gspread.WorksheetNotFound:
         raise HTTPException(status_code=404, detail="No template worksheet found for this sheet.")
     except gspread.exceptions.SpreadsheetNotFound:

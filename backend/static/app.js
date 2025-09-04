@@ -1,3 +1,5 @@
+// static/scripts/app.js
+
 import * as dom from "./scripts/domElements.js";
 import * as api from "./scripts/api.js";
 import * as ui from "./scripts/ui.js";
@@ -41,55 +43,46 @@ async function checkForUpdatesOnLoad() {
       console.log("Scribe is up to date.");
     }
   } catch (error) {
-    // Fail silently, this is not a critical feature.
     console.warn("Could not check for updates on startup:", error);
   }
 }
 
 let templatePollInterval = null;
 
-// --- FIX START: Added console logging for transparency ---
 async function checkTemplateForUpdates() {
   if (!state.currentSheetId || !state.sheetTemplateTimestamp) {
     return;
   }
 
-  console.log(
-    `[Template Check] Polling for updates. Current local timestamp: ${state.sheetTemplateTimestamp}`
+  // --- FIX START: Add visual feedback for the check ---
+  ui.showToastNotification(
+    "Checking for template updates...",
+    "checking",
+    2000
   );
+  // --- FIX END ---
 
   const status = await api.getSheetTemplateStatus(state.currentSheetId);
   const banner = document.getElementById("template-update-banner");
 
   if (status && status.last_updated) {
-    console.log(
-      `[Template Check] Latest remote timestamp: ${status.last_updated}`
-    );
     if (status.last_updated > state.sheetTemplateTimestamp) {
-      console.log("[Template Check] New version found! Showing banner.");
       banner.classList.remove("hidden");
     } else {
-      console.log("[Template Check] Template is up to date.");
       banner.classList.add("hidden");
     }
-  } else {
-    console.warn("[Template Check] Could not retrieve remote timestamp.");
   }
 }
-// --- FIX END ---
 
 function startTemplatePolling() {
-  stopTemplatePolling(); // Ensure no multiple intervals are running
+  stopTemplatePolling();
   if (state.sheetTemplateTimestamp) {
-    console.log("[Template Check] Starting polling every 30 seconds.");
-    checkTemplateForUpdates(); // Check immediately on start
     templatePollInterval = setInterval(checkTemplateForUpdates, 30000);
   }
 }
 
 function stopTemplatePolling() {
   if (templatePollInterval) {
-    console.log("[Template Check] Stopping polling.");
     clearInterval(templatePollInterval);
     templatePollInterval = null;
   }

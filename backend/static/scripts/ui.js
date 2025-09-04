@@ -5,23 +5,18 @@ import * as api from "./api.js";
 let autoFillNotifyTimer = null;
 
 export function showDebouncedAutoFillNotification() {
-  // Clear any existing timer to reset the waiting period
   if (autoFillNotifyTimer) {
     clearTimeout(autoFillNotifyTimer);
   }
 
-  // Set a new timer. If this function is called again quickly, the old timer
-  // will be cleared and a new one will be set.
   autoFillNotifyTimer = setTimeout(() => {
     showToastNotification(
       "Fields were automatically updated based on your selection.",
       "autofill"
     );
-    autoFillNotifyTimer = null; // Reset after the notification is shown
-  }, 300); // Wait 300ms after the last change to show the notification
+    autoFillNotifyTimer = null;
+  }, 300);
 }
-
-// --- Notifications & Loaders ---
 
 export function showLoading(title, text) {
   dom.loadingTitle.textContent = title;
@@ -63,6 +58,8 @@ export function showToastNotification(message, type = "info", duration = 5000) {
     warning: "bg-yellow-500/80 border-yellow-600",
     info: "bg-blue-600/80 border-blue-700",
     autofill: "bg-indigo-600/80 border-indigo-700",
+    // --- FIX: Add new style for the checking notification ---
+    checking: "bg-gray-600/80 border-gray-700",
   };
 
   notification.className = `toast-notification fade-in ${
@@ -79,7 +76,6 @@ export function showToastNotification(message, type = "info", duration = 5000) {
 }
 
 export function showAutoFillNotification(message, type = "autofill") {
-  // Use a specific type and a longer duration for auto-fill messages
   showToastNotification(message, type, 7000);
 }
 
@@ -87,8 +83,6 @@ function showIncompleteAnnotationNotification() {
   const message = `<p class="font-bold text-white">Incomplete Annotation Found</p><p class="text-sm text-white">This paper was partially saved. Missing fields are highlighted.</p>`;
   showToastNotification(message, "warning");
 }
-
-// --- Form & Content Management ---
 
 function highlightMissingFields(annotationData) {
   document
@@ -120,7 +114,6 @@ function applyExistingAnnotation(annotationData) {
     const element = document.getElementById(key);
 
     if (element) {
-      // Handle our new boolean button group
       if (
         element.type === "hidden" &&
         element.parentElement.classList.contains("boolean-button-group")
@@ -138,7 +131,6 @@ function applyExistingAnnotation(annotationData) {
           if (btn) btn.click();
         }
       } else {
-        // Handle standard select elements
         element.value = value;
       }
       element.dispatchEvent(new Event("change", { bubbles: true }));
@@ -154,7 +146,6 @@ function applyExistingAnnotation(annotationData) {
 export function applyGeminiSuggestions(suggestions, activeTemplate) {
   if (!suggestions || !activeTemplate) return;
 
-  // Hide all existing action buttons before applying new ones
   document
     .querySelectorAll(".reasoning-bubble-btn, .clear-ai-btn, .revert-ai-btn")
     .forEach((btn) => btn.classList.add("hidden"));
@@ -170,7 +161,6 @@ export function applyGeminiSuggestions(suggestions, activeTemplate) {
     );
     const contextTextarea = document.querySelector(`[name="${key}_context"]`);
 
-    // --- Store previous state before making changes ---
     element.dataset.previousValue = element.value;
     if (contextTextarea) {
       contextTextarea.dataset.previousContext = contextTextarea.value;
@@ -182,7 +172,6 @@ export function applyGeminiSuggestions(suggestions, activeTemplate) {
         !reasoningBtn.classList.contains("hidden");
     }
 
-    // --- Apply new suggestions ---
     const fieldDef = activeTemplate.fields.find((f) => f.id === key);
     const value = suggestions[key];
     const context = suggestions[`${key}_context`];
@@ -221,7 +210,6 @@ export function applyGeminiSuggestions(suggestions, activeTemplate) {
       reasoningBtn.dataset.reasoningText = reasoning;
       reasoningBtn.classList.remove("hidden");
 
-      // Show the clear and revert buttons for this specific field
       const clearBtn = document.querySelector(
         `.clear-ai-btn[data-clear-target="${key}"]`
       );
@@ -251,10 +239,8 @@ function clearAISuggestion(fieldId) {
     reasoningBtn.dataset.reasoningText = "";
   }
 
-  // This field is no longer considered AI-suggested
   delete element.dataset.aiSuggested;
 
-  // Hide the action buttons
   const clearBtn = document.querySelector(
     `.clear-ai-btn[data-clear-target="${fieldId}"]`
   );
@@ -274,7 +260,6 @@ function revertAIField(fieldId) {
     `.reasoning-bubble-btn[data-reasoning-target="${fieldId}"]`
   );
 
-  // Revert the main value
   const previousValue = element.dataset.previousValue;
   if (
     element.type === "hidden" &&
@@ -287,7 +272,6 @@ function revertAIField(fieldId) {
       if (btn) {
         btn.click();
       } else {
-        // If previous value was empty, deactivate all buttons
         element.parentElement
           .querySelectorAll(".boolean-btn.active")
           .forEach((b) => b.classList.remove("active"));
@@ -299,7 +283,6 @@ function revertAIField(fieldId) {
   }
   element.dispatchEvent(new Event("change", { bubbles: true }));
 
-  // Revert context
   if (
     contextTextarea &&
     contextTextarea.dataset.previousContext !== undefined
@@ -307,7 +290,6 @@ function revertAIField(fieldId) {
     contextTextarea.value = contextTextarea.dataset.previousContext;
   }
 
-  // Revert reasoning bubble
   if (reasoningBtn) {
     reasoningBtn.dataset.reasoningText =
       reasoningBtn.dataset.previousReasoningText || "";
@@ -318,7 +300,6 @@ function revertAIField(fieldId) {
     }
   }
 
-  // Clean up and hide buttons
   delete element.dataset.aiSuggested;
   delete element.dataset.previousValue;
   if (contextTextarea) delete contextTextarea.dataset.previousContext;
@@ -374,7 +355,6 @@ export function resetForm() {
     .querySelectorAll(".field-missing")
     .forEach((el) => el.classList.remove("field-missing"));
 
-  // --- Clean up all AI-related state ---
   document
     .querySelectorAll(".reasoning-bubble-btn, .clear-ai-btn, .revert-ai-btn")
     .forEach((btn) => {
@@ -402,11 +382,9 @@ export function setupContextToggles() {
       const contextBox = document.getElementById(targetId);
       if (contextBox) {
         let shouldShow;
-        // For select elements, show if any option other than the placeholder is selected.
         if (event.target.tagName === "SELECT") {
           shouldShow = event.target.value !== "";
         } else {
-          // For boolean buttons (which use a hidden input), show only if the value is 'true'.
           shouldShow = event.target.value === "true";
         }
         contextBox.classList.toggle("hidden", !shouldShow);
@@ -431,14 +409,12 @@ export function setupFieldActionControls() {
         return;
       }
 
-      // --- FIX START: Added lock button functionality ---
       const lockBtn = event.target.closest(".autofill-lock-btn");
       if (lockBtn && lockBtn.dataset.targetLock) {
         const fieldId = lockBtn.dataset.targetLock;
         const elementToLock = document.getElementById(fieldId);
         if (!elementToLock) return;
 
-        // Toggle the locked state by checking for the presence of the dataset attribute
         const isNowLocked = !elementToLock.dataset.locked;
         if (isNowLocked) {
           elementToLock.dataset.locked = "true";
@@ -446,7 +422,6 @@ export function setupFieldActionControls() {
           delete elementToLock.dataset.locked;
         }
 
-        // Toggle the button's visual state
         lockBtn.classList.toggle("active", isNowLocked);
         lockBtn
           .querySelector(".icon-unlocked")
@@ -456,7 +431,6 @@ export function setupFieldActionControls() {
           .classList.toggle("hidden", !isNowLocked);
         return;
       }
-      // --- FIX END ---
     });
   }
 }
