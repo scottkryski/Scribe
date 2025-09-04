@@ -77,7 +77,6 @@ async def connect_to_sheet(request: ConnectSheetRequest):
                 if 'fields' in parsed_template and isinstance(parsed_template['fields'], list):
                     state.SHEET_TEMPLATES[sheet_id] = parsed_template
                     has_sheet_template = True
-                    # --- FIX: Get the last updated time for the template worksheet ---
                     template_timestamp = template_worksheet.updated_time
                     print(f"LOG: Found and loaded a valid template from worksheet '_template' in sheet '{spreadsheet.title}'.")
                 else:
@@ -105,13 +104,15 @@ async def connect_to_sheet(request: ConnectSheetRequest):
         print(f"ERROR: Failed to connect to sheet: {e}")
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
-# --- FIX START: New endpoint for checking template status ---
 @router.get("/api/sheets/{sheet_id}/template-status")
 async def get_sheet_template_status(sheet_id: str):
     if not state.gspread_client:
         raise HTTPException(status_code=503, detail="Google Sheets client not initialized.")
     try:
+        # --- FIX START: Force a refresh of the spreadsheet metadata ---
         spreadsheet = state.gspread_client.open_by_key(sheet_id)
+        spreadsheet.fetch_sheet_metadata() 
+        # --- FIX END ---
         template_worksheet = spreadsheet.worksheet("_template")
         return {"last_updated": template_worksheet.updated_time}
     except gspread.WorksheetNotFound:
@@ -120,15 +121,11 @@ async def get_sheet_template_status(sheet_id: str):
         raise HTTPException(status_code=404, detail="Spreadsheet not found.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-# --- FIX END ---
 
 @router.get("/api/sheets/{sheet_id}/template")
 async def get_sheet_template(sheet_id: str):
-    if sheet_id in state.SHEET_TEMPLATES:
-        return state.SHEET_TEMPLATES[sheet_id]
-    
-    # --- FIX: Add a fallback to fetch it live if not in cache ---
-    print(f"LOG: Template for sheet {sheet_id} not in cache, fetching live.")
+    # --- FIX START: Always fetch the template live to prevent serving a stale cache ---
+    print(f"LOG: Live-fetching template for sheet {sheet_id}.")
     if not state.gspread_client:
         raise HTTPException(status_code=503, detail="Google Sheets client not initialized.")
     try:
@@ -137,6 +134,7 @@ async def get_sheet_template(sheet_id: str):
         template_json_str = template_worksheet.acell('A1').value
         if template_json_str:
             parsed_template = json.loads(template_json_str)
+            # Update the cache with the fresh version
             state.SHEET_TEMPLATES[sheet_id] = parsed_template
             return parsed_template
         else:
@@ -145,6 +143,7 @@ async def get_sheet_template(sheet_id: str):
         raise HTTPException(status_code=404, detail="No template worksheet found for this sheet.")
     except Exception as e:
          raise HTTPException(status_code=500, detail=f"Failed to live-fetch template: {e}")
+    # --- FIX END ---
 
 
 @router.post("/api/sheets/{sheet_id}/template")
