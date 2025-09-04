@@ -48,29 +48,48 @@ async function checkForUpdatesOnLoad() {
 
 let templatePollInterval = null;
 
+// --- FIX START: Added console logging for transparency ---
 async function checkTemplateForUpdates() {
   if (!state.currentSheetId || !state.sheetTemplateTimestamp) {
     return;
   }
+
+  console.log(
+    `[Template Check] Polling for updates. Current local timestamp: ${state.sheetTemplateTimestamp}`
+  );
+
   const status = await api.getSheetTemplateStatus(state.currentSheetId);
   const banner = document.getElementById("template-update-banner");
 
-  if (status && status.last_updated > state.sheetTemplateTimestamp) {
-    banner.classList.remove("hidden");
+  if (status && status.last_updated) {
+    console.log(
+      `[Template Check] Latest remote timestamp: ${status.last_updated}`
+    );
+    if (status.last_updated > state.sheetTemplateTimestamp) {
+      console.log("[Template Check] New version found! Showing banner.");
+      banner.classList.remove("hidden");
+    } else {
+      console.log("[Template Check] Template is up to date.");
+      banner.classList.add("hidden");
+    }
   } else {
-    banner.classList.add("hidden");
+    console.warn("[Template Check] Could not retrieve remote timestamp.");
   }
 }
+// --- FIX END ---
 
 function startTemplatePolling() {
   stopTemplatePolling(); // Ensure no multiple intervals are running
   if (state.sheetTemplateTimestamp) {
-    templatePollInterval = setInterval(checkTemplateForUpdates, 30000); // Check every 30 seconds
+    console.log("[Template Check] Starting polling every 30 seconds.");
+    checkTemplateForUpdates(); // Check immediately on start
+    templatePollInterval = setInterval(checkTemplateForUpdates, 30000);
   }
 }
 
 function stopTemplatePolling() {
   if (templatePollInterval) {
+    console.log("[Template Check] Stopping polling.");
     clearInterval(templatePollInterval);
     templatePollInterval = null;
   }
@@ -96,7 +115,6 @@ document.addEventListener("DOMContentLoaded", () => {
     sheetTemplateTimestamp: null,
   };
 
-  // --- Module Initialization ---
   const actions = initializeActions(state);
   initializeLockTimer(state);
 
@@ -228,9 +246,8 @@ document.addEventListener("DOMContentLoaded", () => {
     await settings.setupSettings();
     ui.setupFieldActionControls();
 
-    // --- Event Listeners ---
     dom.sheetSelector.addEventListener("change", (e) => {
-      stopTemplatePolling(); // Stop polling when sheet changes
+      stopTemplatePolling();
       actions.handleSheetChange(e);
     });
     dom.datasetSelector.addEventListener("change", actions.handleDatasetChange);
