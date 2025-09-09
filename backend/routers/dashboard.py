@@ -16,12 +16,33 @@ class SetLockRequest(BaseModel):
     annotator: str
     dataset: str
 
+class CommentRequest(BaseModel):
+    doi: str
+    annotator: str
+    comment: str
+
 def _get_comments_worksheet():
-    if not state.worksheet: return None
+    """Gets the 'Comments' worksheet, creating it if it does not exist."""
+    if not state.worksheet:
+        print("WARN: Cannot get comments worksheet, no main sheet connected.")
+        return None
     try:
         ss = state.worksheet.spreadsheet
         return ss.worksheet("Comments")
-    except Exception:
+    except gspread.WorksheetNotFound:
+        print("LOG: 'Comments' worksheet not found. Creating it.")
+        try:
+            ss = state.worksheet.spreadsheet
+            comments_ws = ss.add_worksheet(title="Comments", rows="1", cols="4")
+            # --- FIX: Set a more logical default header order ---
+            comments_ws.update('A1', [['doi', 'annotator', 'timestamp', 'comment']])
+            print("LOG: Successfully created 'Comments' worksheet with headers.")
+            return comments_ws
+        except Exception as create_e:
+            print(f"ERROR: Failed to create 'Comments' worksheet: {create_e}")
+            return None
+    except Exception as e:
+        print(f"ERROR: Could not get 'Comments' worksheet: {e}")
         return None
 
 router = APIRouter()
@@ -43,6 +64,51 @@ def _get_all_records():
     except Exception as e:
         print(f"ERROR: Could not fetch records from Google Sheet: {e}")
         return []
+
+@router.get("/api/comments/{doi:path}")
+async def get_comments(doi: str):
+    comments_ws = _get_comments_worksheet()
+    if not comments_ws:
+        raise HTTPException(status_code=500, detail="Could not access the Comments worksheet.")
+    
+    try:
+        all_comments = comments_ws.get_all_records()
+        doi_comments = [
+            comment for comment in all_comments 
+            if comment.get('doi') == doi
+        ]
+        doi_comments.sort(key=lambda r: r.get("timestamp", ""))
+        return {"items": doi_comments}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve comments: {e}")
+
+@router.post("/api/comments")
+async def add_comment(request: CommentRequest):
+    comments_ws = _get_comments_worksheet()
+    if not comments_ws:
+        raise HTTPException(status_code=500, detail="Could not access the Comments worksheet.")
+
+    try:
+        # --- FIX: Read headers to ensure data is inserted into the correct columns ---
+        headers = comments_ws.row_values(1)
+        if not headers:
+             raise HTTPException(status_code=500, detail="Comments worksheet is missing headers.")
+
+        comment_data = {
+            "doi": request.doi,
+            "annotator": request.annotator,
+            "comment": request.comment,
+            "timestamp": get_human_readable_timestamp()
+        }
+        
+        # Build the row in the exact order of the sheet's current headers
+        new_row = [comment_data.get(header, "") for header in headers]
+        
+        comments_ws.append_row(new_row, value_input_option='USER_ENTERED')
+        return {"status": "success", "message": "Comment added."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to post comment: {e}")
+
 
 @router.post("/api/set-lock")
 async def set_lock(request: SetLockRequest):
@@ -229,7 +295,6 @@ async def reopen_annotation(request: ReopenRequest):
         if cell:
             headers = state.worksheet.row_values(1)
             values = state.worksheet.row_values(cell.row)
-            # --- FIX: Corrected typo from row__data to row_data ---
             row_data = dict(zip(headers, values))
             
             non_placeholder_keys = ['annotator'] + [h for h in headers if '_context' in h or h.startswith('trigger_')]
@@ -266,7 +331,6 @@ async def get_detailed_stats():
     doc_type_counts = Counter()
     annotator_counts = Counter()
     dataset_counts = Counter()
-    # --- FIX: Add status counter ---
     status_counts = Counter()
 
     headers = list(records[0].keys()) if records else []
@@ -284,7 +348,6 @@ async def get_detailed_stats():
         if doc_type:
             doc_type_counts[doc_type] += 1
 
-        # --- FIX: Make annotator lookup case-insensitive ---
         annotator = record.get("Annotator") or record.get("annotator")
         if annotator:
             annotator_counts[annotator] += 1
@@ -293,7 +356,6 @@ async def get_detailed_stats():
         if dataset:
             dataset_counts[dataset] += 1
             
-        # --- FIX: Count statuses correctly ---
         status = record.get("status", "Completed") or "Completed"
         status_counts[status] += 1
 

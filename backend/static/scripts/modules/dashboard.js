@@ -19,7 +19,6 @@ function statusFormatter(cell) {
   const status = data.status;
   const annotator = data.annotator;
 
-  // --- FIX: Add new "Reviewing" status color ---
   const colorClasses = {
     Completed: "bg-green-500/20 text-green-300 border-green-500/30",
     Incomplete: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
@@ -247,7 +246,8 @@ function renderThread(items) {
         <strong class="text-white">${
           it.annotator || "Anon"
         }</strong> &middot; ${
-          it.timestamp ? new Date(it.timestamp).toLocaleString() : ""
+          // --- FIX: Display the timestamp string directly instead of trying to parse it ---
+          it.timestamp || ""
         }
       </div>
       <div class="text-gray-200 whitespace-pre-wrap">${escapeHtml(
