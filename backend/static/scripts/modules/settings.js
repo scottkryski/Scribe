@@ -177,6 +177,18 @@ export function initializeSettings(_state, _viewManager, _buildAnnotationForm) {
           localStorage.setItem("prioritizeIncomplete", e.target.checked)
         );
 
+      const augmentSampleCountInput = document.getElementById(
+        "augment-sample-count"
+      );
+      augmentSampleCountInput.value =
+        localStorage.getItem("augmentSampleCount") || "3";
+      augmentSampleCountInput.addEventListener("input", () => {
+        localStorage.setItem(
+          "augmentSampleCount",
+          augmentSampleCountInput.value
+        );
+      });
+
       dom.saveApiKeyBtn.addEventListener("click", onSaveApiKey);
       document
         .querySelectorAll(".theme-btn")

@@ -46,3 +46,14 @@ class ConnectSheetRequest(BaseModel):
 class ReopenRequest(BaseModel): # New
     doi: str
     dataset: str
+
+class AugmentationRequest(BaseModel):
+    doi: str
+    title: str
+    abstract: str
+    dataset: str
+    annotator: str
+    model_name: str
+    sample_count: int
+    annotations: Dict[str, Any]
+    template: Dict[str, Any]

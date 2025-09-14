@@ -47,48 +47,6 @@ async function checkForUpdatesOnLoad() {
   }
 }
 
-let templatePollInterval = null;
-
-async function checkTemplateForUpdates() {
-  if (!state.currentSheetId || !state.sheetTemplateTimestamp) {
-    return;
-  }
-
-  // --- FIX START: Add visual feedback for the check ---
-  ui.showToastNotification(
-    "Checking for template updates...",
-    "checking",
-    2000
-  );
-  // --- FIX END ---
-
-  const status = await api.getSheetTemplateStatus(state.currentSheetId);
-  const banner = document.getElementById("template-update-banner");
-
-  if (status && status.last_updated) {
-    if (status.last_updated > state.sheetTemplateTimestamp) {
-      banner.classList.remove("hidden");
-    } else {
-      banner.classList.add("hidden");
-    }
-  }
-}
-
-function startTemplatePolling() {
-  stopTemplatePolling();
-  if (state.sheetTemplateTimestamp) {
-    templatePollInterval = setInterval(checkTemplateForUpdates, 30000);
-  }
-}
-
-function stopTemplatePolling() {
-  if (templatePollInterval) {
-    clearInterval(templatePollInterval);
-    templatePollInterval = null;
-  }
-  document.getElementById("template-update-banner").classList.add("hidden");
-}
-
 document.addEventListener("DOMContentLoaded", () => {
   dom.init();
 
@@ -106,6 +64,7 @@ document.addEventListener("DOMContentLoaded", () => {
     isAppInitialized: false,
     currentFilterQuery: "",
     sheetTemplateTimestamp: null,
+    templatePollInterval: null,
   };
 
   const actions = initializeActions(state);
@@ -119,6 +78,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     },
   });
+
+  // FIX: Provide the dashboard module reference to the actions module
+  if (actions.setDashboardModule) {
+    actions.setDashboardModule(dashboard);
+  }
+
   viewManager = initializeViewManager(state, actions, dashboard);
 
   const settings = initializeSettings(
@@ -240,11 +205,14 @@ document.addEventListener("DOMContentLoaded", () => {
     ui.setupFieldActionControls();
 
     dom.sheetSelector.addEventListener("change", (e) => {
-      stopTemplatePolling();
       actions.handleSheetChange(e);
     });
     dom.datasetSelector.addEventListener("change", actions.handleDatasetChange);
     dom.submitBtn.addEventListener("click", actions.submitAnnotation);
+    dom.submitAugmentBtn.addEventListener(
+      "click",
+      actions.submitAndAugmentAnnotation
+    );
     dom.skipBtn.addEventListener("click", actions.handleSkip);
     dom.getSuggestionsBtn.addEventListener(
       "click",
@@ -318,8 +286,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
     }
-
-    document.addEventListener("startTemplatePolling", startTemplatePolling);
 
     const setupComplete = await viewManager.runInitialSetupCheck();
     if (setupComplete) {

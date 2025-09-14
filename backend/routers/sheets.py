@@ -3,7 +3,8 @@ import gspread
 import json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Any, Dict
+from typing import Any, Dict, List
+import gspread.utils
 
 from app_state import state
 from models import ConnectSheetRequest, SheetUrlRequest
@@ -23,6 +24,76 @@ def _load_sheets_config():
 def _save_sheets_config(config):
     with open(SHEETS_CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
+
+def write_synthetic_data(spreadsheet: gspread.Spreadsheet, data: List[Dict[str, Any]]):
+    """
+    Writes a list of synthetic data records to a 'SyntheticData' sheet.
+    FIX: This function now correctly filters headers and resizes the sheet.
+    """
+    if not data:
+        print("WARN: No synthetic data provided to write.")
+        return
+
+    try:
+        worksheet = spreadsheet.worksheet("SyntheticData")
+    except gspread.WorksheetNotFound:
+        print("LOG: 'SyntheticData' worksheet not found. Creating it.")
+        worksheet = spreadsheet.add_worksheet(title="SyntheticData", rows=1, cols=30)
+
+    existing_headers = worksheet.row_values(1)
+    
+    # Define the ideal headers based on the current data structure
+    first_record_annotations = data[0].get("annotations", {})
+    
+    # --- FIX: Exclude system/internal fields from the header list ---
+    EXCLUDED_KEYS = [
+        'annotator', 'lock_annotator', 'lock_timestamp', 'status', 
+        'latest_comment', 'doi', 'title', 'dataset', ''
+    ]
+    annotation_keys = [
+        k for k in first_record_annotations.keys() 
+        if k not in EXCLUDED_KEYS and '_context' not in k and '_reasoning' not in k
+    ]
+    
+    ideal_headers = ["doi", "title", "abstract", "annotator", "dataset"] + sorted(annotation_keys)
+    
+    final_headers = []
+
+    if not existing_headers:
+        print("LOG: 'SyntheticData' sheet is empty. Writing new headers.")
+        worksheet.append_row(ideal_headers, value_input_option='USER_ENTERED')
+        final_headers = ideal_headers
+    else:
+        missing_headers = [h for h in ideal_headers if h not in existing_headers]
+        if missing_headers:
+            print(f"LOG: Found missing headers: {missing_headers}. Appending to sheet.")
+            
+            # --- FIX: Explicitly add columns to the sheet before writing to them ---
+            worksheet.add_cols(len(missing_headers))
+            
+            start_cell = gspread.utils.rowcol_to_a1(1, len(existing_headers) + 1)
+            worksheet.update(start_cell, [missing_headers], value_input_option='USER_ENTERED')
+            final_headers = existing_headers + missing_headers
+        else:
+            final_headers = existing_headers
+    
+    rows_to_append = []
+    for record in data:
+        row = []
+        annotations = record.get("annotations", {})
+        for header in final_headers:
+            if header in record:
+                row.append(record[header])
+            elif header in annotations:
+                row.append(annotations[header])
+            else:
+                row.append("")
+        rows_to_append.append(row)
+
+    if rows_to_append:
+        worksheet.append_rows(rows_to_append, value_input_option='USER_ENTERED')
+        print(f"LOG: Successfully appended {len(rows_to_append)} rows to 'SyntheticData' sheet.")
+
 
 @router.get("/api/sheets", response_model=list)
 async def get_sheets():
@@ -77,7 +148,7 @@ async def connect_to_sheet(request: ConnectSheetRequest):
                 if 'fields' in parsed_template and isinstance(parsed_template['fields'], list):
                     state.SHEET_TEMPLATES[sheet_id] = parsed_template
                     has_sheet_template = True
-                    # --- FIX: Use the correct attribute 'lastUpdateTime' ---
+                    spreadsheet.fetch_sheet_metadata()
                     template_timestamp = spreadsheet.lastUpdateTime
                     print(f"LOG: Found and loaded a valid template from worksheet '_template' in sheet '{spreadsheet.title}'.")
                 else:
@@ -113,7 +184,6 @@ async def get_sheet_template_status(sheet_id: str):
         spreadsheet = state.gspread_client.open_by_key(sheet_id)
         spreadsheet.fetch_sheet_metadata() 
         spreadsheet.worksheet("_template")
-        # --- FIX: Use the correct attribute 'lastUpdateTime' ---
         return {"last_updated": spreadsheet.lastUpdateTime}
     except gspread.WorksheetNotFound:
         raise HTTPException(status_code=404, detail="No template worksheet found for this sheet.")

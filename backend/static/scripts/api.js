@@ -41,6 +41,36 @@ export async function getGeminiModels() {
   }
 }
 
+export async function fetchGeminiSuggestions(
+  pdf_filename,
+  model_name,
+  template
+) {
+  const response = await fetch(`${API_BASE_URL}/get-gemini-suggestions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pdf_filename, model_name, template }),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.detail || "Failed to get AI suggestions.");
+  }
+  return data;
+}
+
+export async function augmentData(payload) {
+  const response = await fetch(`${API_BASE_URL}/augment-data`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.detail || "Failed to augment data.");
+  }
+  return data;
+}
+
 // --- Statistics ---
 
 export async function getSheetStats() {
@@ -62,23 +92,6 @@ export async function getDetailedStats() {
   return response.json();
 }
 
-export async function fetchGeminiSuggestions(
-  pdf_filename,
-  model_name,
-  template
-) {
-  const response = await fetch(`${API_BASE_URL}/get-gemini-suggestions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pdf_filename, model_name, template }),
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.detail || "Failed to get AI suggestions.");
-  }
-  return data;
-}
-
 // --- Dashboard API ---
 
 export async function getSheetData(dataset) {
@@ -91,6 +104,17 @@ export async function getSheetData(dataset) {
     const errorData = await response.json();
     throw new Error(
       errorData.detail || "Failed to fetch sheet data from server."
+    );
+  }
+  return response.json();
+}
+
+export async function getSyntheticSheetData() {
+  const response = await fetch(`${API_BASE_URL}/api/synthetic-sheet-data`);
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(
+      errorData.detail || "Failed to fetch synthetic sheet data."
     );
   }
   return response.json();

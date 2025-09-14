@@ -65,6 +65,31 @@ def _get_all_records():
         print(f"ERROR: Could not fetch records from Google Sheet: {e}")
         return []
 
+@router.get("/api/synthetic-sheet-data")
+async def get_synthetic_sheet_data():
+    """Fetches all data from the 'SyntheticData' worksheet."""
+    if not state.worksheet:
+        raise HTTPException(status_code=400, detail="No active Google Sheet connection.")
+    
+    try:
+        spreadsheet = state.worksheet.spreadsheet
+        synth_worksheet = spreadsheet.worksheet("SyntheticData")
+        
+        all_values = synth_worksheet.get_all_values()
+        headers = all_values[0] if all_values else []
+        rows = all_values[1:] if len(all_values) > 1 else []
+        
+        # Convert rows to list of dicts
+        records = [dict(zip(headers, row)) for row in rows]
+
+        return {"headers": headers, "rows": records}
+    except gspread.WorksheetNotFound:
+        # If the sheet doesn't exist, it's not an error, just return empty data
+        return {"headers": [], "rows": []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve synthetic data: {e}")
+
+
 @router.get("/api/comments/{doi:path}")
 async def get_comments(doi: str):
     comments_ws = _get_comments_worksheet()

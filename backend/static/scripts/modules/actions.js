@@ -8,8 +8,85 @@ import * as templates from "../templates.js";
 
 let state = {};
 let buildAnnotationFormFromTemplateRef;
+let dashboardModule = null; // FIX: Add a reference to the dashboard module
 
-// --- (Helper functions and other actions remain unchanged) ---
+// --- FIX: Moved template polling logic here to fix scope issues ---
+async function checkTemplateForUpdates() {
+  if (!state.currentSheetId || !state.sheetTemplateTimestamp) {
+    return;
+  }
+  ui.showToastNotification(
+    "Checking for template updates...",
+    "checking",
+    2000
+  );
+  const status = await api.getSheetTemplateStatus(state.currentSheetId);
+  const banner = document.getElementById("template-update-banner");
+  if (status && status.last_updated) {
+    if (status.last_updated > state.sheetTemplateTimestamp) {
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+    }
+  }
+}
+
+function startTemplatePolling() {
+  stopTemplatePolling();
+  if (state.sheetTemplateTimestamp) {
+    state.templatePollInterval = setInterval(checkTemplateForUpdates, 30000);
+  }
+}
+
+function stopTemplatePolling() {
+  if (state.templatePollInterval) {
+    clearInterval(state.templatePollInterval);
+    state.templatePollInterval = null;
+  }
+  document.getElementById("template-update-banner").classList.add("hidden");
+}
+
+// --- Helper function to avoid code duplication in submit actions ---
+async function performSubmit(buttonToLoad) {
+  const annotatorName = localStorage.getItem("annotatorName") || "";
+  if (!state.currentPaper || !annotatorName) {
+    alert("Please set your Annotator Name in Settings before submitting.");
+    return { success: false };
+  }
+  const annotations = {};
+  state.activeTemplate.fields.forEach((field) => {
+    const element = document.getElementById(field.id);
+    if (element) {
+      let value = element.value;
+      // For boolean, convert to actual boolean if it's a string 'true'/'false'
+      if (field.type === "boolean") {
+        if (value === "true") value = true;
+        else if (value === "false") value = false;
+        else value = null;
+      }
+      annotations[field.id] = value;
+      const contextEl = document.querySelector(`[name="${field.id}_context"]`);
+      if (contextEl) annotations[`${field.id}_context`] = contextEl.value;
+    }
+  });
+  const payload = {
+    dataset: state.currentDataset,
+    doi: state.currentPaper.doi,
+    title: state.currentPaper.title,
+    annotator: annotatorName,
+    annotations: annotations,
+  };
+  ui.setButtonLoading(buttonToLoad, true, "Submitting...");
+  try {
+    await api.submitAnnotation(payload);
+    return { success: true, payload };
+  } catch (error) {
+    alert("Submission error. Please try again.");
+    ui.setButtonLoading(buttonToLoad, false, buttonToLoad.textContent); // Restore text
+    return { success: false };
+  }
+}
+
 function applyAutoFillRule(rule, triggerId) {
   const targetEl = document.getElementById(rule.targetId);
   if (!targetEl || targetEl.dataset.locked === "true") return;
@@ -127,6 +204,10 @@ export function initializeActions(_state) {
     setBuildFormCallback: (callback) => {
       buildAnnotationFormFromTemplateRef = callback;
     },
+    // FIX: Add function to link the dashboard module
+    setDashboardModule: (dashboard) => {
+      dashboardModule = dashboard;
+    },
 
     displaySpecificPaper: async (paper) => {
       stopLockTimer();
@@ -135,42 +216,63 @@ export function initializeActions(_state) {
     },
 
     submitAnnotation: async () => {
-      const annotatorName = localStorage.getItem("annotatorName") || "";
-      if (!state.currentPaper || !annotatorName) {
-        alert("Please set your Annotator Name in Settings before submitting.");
-        return;
-      }
-      const annotations = {};
-      state.activeTemplate.fields.forEach((field) => {
-        const element = document.getElementById(field.id);
-        if (element) {
-          annotations[field.id] = element.value;
-          const contextEl = document.querySelector(
-            `[name="${field.id}_context"]`
-          );
-          if (contextEl) annotations[`${field.id}_context`] = contextEl.value;
-        }
-      });
-      const payload = {
-        dataset: state.currentDataset,
-        doi: state.currentPaper.doi,
-        title: state.currentPaper.title,
-        annotator: annotatorName,
-        annotations: annotations,
-      };
-      ui.setButtonLoading(dom.submitBtn, true, "Submitting...");
-      try {
-        await api.submitAnnotation(payload);
+      const result = await performSubmit(dom.submitBtn);
+      if (result.success) {
         ui.showToastNotification(
           "Annotation submitted successfully!",
           "success"
         );
         stopLockTimer();
         await fetchAndDisplayNextPaper();
+      }
+      ui.setButtonLoading(dom.submitBtn, false, "Submit");
+    },
+
+    submitAndAugmentAnnotation: async () => {
+      const submitResult = await performSubmit(dom.submitAugmentBtn);
+
+      if (!submitResult.success) {
+        ui.setButtonLoading(dom.submitAugmentBtn, false, "Submit & Augment");
+        return;
+      }
+
+      ui.showLoading(
+        "Augmenting Data...",
+        "Generating synthetic samples with AI..."
+      );
+
+      try {
+        const augmentPayload = {
+          doi: state.currentPaper.doi,
+          title: state.currentPaper.title,
+          abstract: state.currentPaper.abstract,
+          dataset: state.currentDataset,
+          annotator: localStorage.getItem("annotatorName") || "unknown",
+          model_name:
+            localStorage.getItem("geminiModel") || "gemini-1.5-flash-latest",
+          sample_count: parseInt(
+            localStorage.getItem("augmentSampleCount") || "3",
+            10
+          ),
+          annotations: submitResult.payload.annotations,
+          template: state.activeTemplate,
+        };
+
+        const augmentResult = await api.augmentData(augmentPayload);
+
+        ui.showToastNotification(
+          augmentResult.message || "Augmentation complete!",
+          "success"
+        );
       } catch (error) {
-        alert("Submission error. Please try again.");
+        ui.showToastNotification(
+          `Augmentation failed: ${error.message}`,
+          "error"
+        );
       } finally {
-        ui.setButtonLoading(dom.submitBtn, false, "Submit");
+        stopLockTimer();
+        await fetchAndDisplayNextPaper();
+        ui.setButtonLoading(dom.submitAugmentBtn, false, "Submit & Augment");
       }
     },
 
@@ -214,14 +316,13 @@ export function initializeActions(_state) {
     },
 
     handleSheetChange: async (e) => {
+      stopTemplatePolling();
       const selectedSheetId = e.target.value;
       document.getElementById("filter-controls").classList.remove("hidden");
       document
         .getElementById("filter-status-container")
         .classList.add("hidden");
       document.getElementById("filter-input").value = "";
-
-      // --- FIX: Reset timestamp state on change ---
       state.sheetTemplateTimestamp = null;
 
       if (!selectedSheetId) {
@@ -244,10 +345,8 @@ export function initializeActions(_state) {
         localStorage.setItem("currentSheetId", selectedSheetId);
 
         if (connectionResult.has_sheet_template) {
-          // --- FIX START: Store timestamp and start polling ---
           state.sheetTemplateTimestamp = connectionResult.template_timestamp;
-          document.dispatchEvent(new CustomEvent("startTemplatePolling"));
-          // --- FIX END ---
+          startTemplatePolling();
 
           ui.showLoading(
             "Connecting to Sheet...",
@@ -259,7 +358,6 @@ export function initializeActions(_state) {
             document.dispatchEvent(
               new CustomEvent("loadSheetTemplate", { detail: sheetTemplate })
             );
-
             document.dispatchEvent(
               new CustomEvent("sheetTemplateActive", {
                 detail: { active: true, hasTemplate: true },
@@ -336,33 +434,49 @@ export function initializeActions(_state) {
         `currentDataset_${state.currentSheetId}`,
         selectedDataset
       );
+
+      // FIX: Refresh the dashboard if it's the active view
+      if (
+        dashboardModule &&
+        !document.getElementById("dashboard-view").classList.contains("hidden")
+      ) {
+        dashboardModule.loadData();
+      }
+
       const filterStatus = await api.getFilterStatus(selectedDataset);
       document.dispatchEvent(
         new CustomEvent("updateFilterUI", { detail: filterStatus })
       );
-      ui.showLoading("Loading Session...", "Checking for resumable papers...");
-      try {
-        const annotatorName = localStorage.getItem("annotatorName");
-        if (annotatorName) {
-          const resumable = await api.checkForResumablePaper(annotatorName);
-          if (resumable.resumable && resumable.dataset === selectedDataset) {
-            if (confirm(`Resume working on "${resumable.title}"?`)) {
-              await api.loadDataset(resumable.dataset);
-              await fetchAndDisplaySpecificPaper(
-                resumable.doi,
-                resumable.dataset
-              );
-              return;
-            } else {
-              await api.skipPaper(resumable.dataset, resumable.doi);
+
+      // Only fetch next paper if we are on the main annotation view
+      if (!document.getElementById("main-view").classList.contains("hidden")) {
+        ui.showLoading(
+          "Loading Session...",
+          "Checking for resumable papers..."
+        );
+        try {
+          const annotatorName = localStorage.getItem("annotatorName");
+          if (annotatorName) {
+            const resumable = await api.checkForResumablePaper(annotatorName);
+            if (resumable.resumable && resumable.dataset === selectedDataset) {
+              if (confirm(`Resume working on "${resumable.title}"?`)) {
+                await api.loadDataset(resumable.dataset);
+                await fetchAndDisplaySpecificPaper(
+                  resumable.doi,
+                  resumable.dataset
+                );
+                return;
+              } else {
+                await api.skipPaper(resumable.dataset, resumable.doi);
+              }
             }
           }
+          await api.loadDataset(state.currentDataset);
+          await fetchAndDisplayNextPaper();
+        } catch (error) {
+          ui.hideLoading();
+          alert(`Error loading dataset: ${error.message}`);
         }
-        await api.loadDataset(state.currentDataset);
-        await fetchAndDisplayNextPaper();
-      } catch (error) {
-        ui.hideLoading();
-        alert(`Error loading dataset: ${error.message}`);
       }
     },
 

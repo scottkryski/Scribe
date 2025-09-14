@@ -191,6 +191,88 @@ async def get_gemini_response(gemini_model: str, pdf_filepath: Path, template: D
             raise RuntimeError(f"Gemini API Error: {e.response.text}")
         raise
 
+def _generate_augmentation_prompt(title: str, abstract: str, annotations: Dict[str, Any], template: Dict[str, Any], sample_count: int) -> str:
+    """Generates a prompt for creating synthetic title/abstract pairs."""
+
+    logic_summary = ""
+    for field in template.get("fields", []):
+        field_id = field.get("id")
+        field_label = field.get("label")
+        annotation_value = annotations.get(field_id)
+        if field_id and field_label and annotation_value is not None:
+            logic_summary += f'- The paper MUST be classifiable as **"{annotation_value}"** for the field **"{field_label}"**.\\n'
+
+    prompt = f"""
+**ROLE AND GOAL:**
+You are a creative expert research author and data scientist. Your goal is to generate a varied and challenging synthetic dataset for training an AI model. You will create {sample_count} new and unique variations of a research paper's title and abstract.
+
+**SOURCE MATERIAL:**
+- **Original Title:** "{title}"
+- **Original Abstract:** "{abstract}"
+
+**CORE DIRECTIVE:**
+Every single synthetic abstract you generate **MUST STRICTLY ADHERE** to the following classification logic. This is the most important rule.
+{logic_summary}
+
+**GENERATION STRATEGY & VARYING DIFFICULTY:**
+You must generate {sample_count} samples that progressively increase in difficulty for an AI to classify. The goal is to force the AI to "read between the lines" and rely on inference rather than simple keywords.
+
+1.  **First Sample (Easy Difficulty):** Create a direct paraphrase of the original title and abstract. The information should be presented clearly and explicitly, making it easy to classify.
+2.  **Intermediate Sample(s) (Medium Difficulty):** Rewrite the abstract to be more subtle. **IMPLY** the classifications. For example, instead of saying "we studied 100 human participants," you might write "we recruited one hundred undergraduates from the university psychology program." Instead of "this was an experiment," describe the setup: "the cohort was divided into a control and a variable group." You must NOT use obvious or explicit keywords related to the classification logic.
+3.  **Final Sample (Hard Difficulty / "Curveball"):** Be the most creative with this sample. You can significantly change the writing style, use more complex vocabulary, or even slightly alter the research context (e.g., a similar study on a different but related population) while **STILL PERFECTLY ADHERING** to the core classification logic. This sample should be the most challenging to classify correctly and require deep contextual understanding.
+
+**OUTPUT FORMAT:**
+You MUST respond with a single, valid JSON object. This object must contain a single key, "synthetic_papers", which is a list of JSON objects. Each object in the list must have exactly two keys: "title" and "abstract". Do not add any explanatory text, markdown formatting, or comments before or after the JSON object.
+"""
+    return prompt
+
+async def get_augmentation_response(
+    model_name: str,
+    title: str,
+    abstract: str,
+    annotations: Dict[str, Any],
+    template: Dict[str, Any],
+    sample_count: int
+):
+    """
+    Generates synthetic title/abstract pairs using the Gemini model.
+    """
+    if not GEMINI_API_KEY:
+        raise RuntimeError("Gemini API key is not configured.")
+
+    # 1. Generate the dynamic prompt
+    try:
+        dynamic_prompt = _generate_augmentation_prompt(title, abstract, annotations, template, sample_count)
+    except Exception as e:
+        raise RuntimeError(f"Failed to generate the augmentation prompt: {e}")
+
+    # 2. Initialize the client and prepare contents
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    contents = [dynamic_prompt]
+
+    # 3. Configure and make the API call
+    try:
+        print(f"Generating synthetic data using model: {model_name}...")
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.8, # Increased temperature for more creative/varied outputs
+        )
+
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=f'models/{model_name}',
+            contents=contents,
+            config=config
+        )
+        print("Synthetic data generation complete.")
+        return json.loads(response.text)
+
+    except Exception as e:
+        print(f"An error occurred during the augmentation API call: {e}")
+        if hasattr(e, 'response') and hasattr(e.response, 'text'):
+            raise RuntimeError(f"Gemini API Error: {e.response.text}")
+        raise
+
 if __name__ == "__main__":
     # --- Configuration for Testing ---
     TEST_OPTION = 2 # or 2

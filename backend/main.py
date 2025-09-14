@@ -36,6 +36,7 @@ async def add_csp_header(request: Request, call_next):
         "img-src 'self' data:; "
         "object-src 'none';"
         "frame-src blob:;"
+        "connect-src 'self' https://unpkg.com;"
     )
     return response
 

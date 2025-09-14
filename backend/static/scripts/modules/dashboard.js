@@ -1,6 +1,6 @@
 // static/scripts/modules/dashboard.js
 import * as api from "../api.js";
-import { showToastNotification } from "../ui.js";
+import { showToastNotification, showLoading, hideLoading } from "../ui.js";
 
 let table = null;
 let state = {};
@@ -11,6 +11,7 @@ const COLS_KEY = "dashboard.visible.columns.v1";
 let allHeaders = [];
 let visibleFields = [];
 let commentsModal = null;
+let activeDashboardTab = "annotations"; // 'annotations' or 'synthetic'
 
 // --- Helper Functions ---
 
@@ -45,13 +46,32 @@ function actionFormatter(cell) {
   if (status === "Available") {
     return `<button class="reopen-btn btn-primary text-xs py-1 px-2">Open</button>`;
   }
-
   if (status === "Locked" || status === "Reviewing") {
     const annotator = data.annotator || "another user";
     return `<button class="btn-secondary text-xs py-1 px-2" disabled title="This paper is currently locked by ${annotator}.">Locked</button>`;
   }
 
-  return `<button class="reopen-btn btn-primary text-xs py-1 px-2">Reopen</button>`;
+  // --- FIX: Show both Reopen and Generate for Completed and Incomplete ---
+  if (status === "Completed" || status === "Incomplete") {
+    return `
+            <div class="flex flex-col gap-1">
+                <button class="reopen-btn btn-primary text-xs py-1 px-2">Reopen</button>
+                <button class="generate-btn btn-primary text-xs py-1 px-2 bg-blue-600 hover:bg-blue-700">Generate</button>
+            </div>
+        `;
+  }
+
+  return ""; // Default empty
+}
+
+// --- FIX: Unified click handler for the actions column ---
+function handleActionClick(e, cell) {
+  const target = e.target;
+  if (target.classList.contains("generate-btn")) {
+    handleGenerateClick(e, cell);
+  } else if (target.classList.contains("reopen-btn")) {
+    handleReopenClick(e, cell);
+  }
 }
 
 async function handleReopenClick(e, cell) {
@@ -77,6 +97,84 @@ async function handleReopenClick(e, cell) {
   }
 }
 
+async function handleGenerateClick(e, cell) {
+  const data = cell.getRow().getData();
+  const currentUser = localStorage.getItem("annotatorName");
+
+  if (!currentUser) {
+    showToastNotification(
+      "Set your annotator name in Settings to generate data.",
+      "error"
+    );
+    return;
+  }
+
+  if (
+    !confirm(
+      `Generate synthetic data based on the annotation for "${data.title}"?`
+    )
+  ) {
+    return;
+  }
+
+  showLoading("Preparing Augmentation...", `Fetching data for ${data.doi}`);
+
+  try {
+    // 1. Fetch the full paper data and its existing annotation
+    const paper = await api.reopenAnnotation(data.doi, state.currentDataset);
+    if (!paper.existing_annotation) {
+      throw new Error(
+        "Could not find the completed annotation data for this paper."
+      );
+    }
+
+    // 2. Construct the new annotator string
+    const originalAnnotator = paper.existing_annotation.annotator || "Original";
+    let newAnnotator = originalAnnotator;
+    if (currentUser !== originalAnnotator) {
+      newAnnotator = `${originalAnnotator} (orig) + ${currentUser}`;
+    }
+
+    // 3. Build the full payload
+    const payload = {
+      doi: paper.doi,
+      title: paper.title,
+      abstract: paper.abstract,
+      dataset: state.currentDataset,
+      annotator: newAnnotator,
+      model_name:
+        localStorage.getItem("geminiModel") || "gemini-1.5-flash-latest",
+      sample_count: parseInt(
+        localStorage.getItem("augmentSampleCount") || "3",
+        10
+      ),
+      annotations: paper.existing_annotation,
+      template: state.activeTemplate,
+    };
+
+    showLoading(
+      "Augmenting Data...",
+      "Generating synthetic samples with AI..."
+    );
+
+    // 4. Call the augment API
+    const result = await api.augmentData(payload);
+    showToastNotification(
+      result.message || "Synthetic data generated successfully!",
+      "success"
+    );
+
+    // 5. If the synthetic tab is active, refresh it
+    if (activeDashboardTab === "synthetic") {
+      await loadSyntheticData();
+    }
+  } catch (error) {
+    showToastNotification(`Generation failed: ${error.message}`, "error");
+  } finally {
+    hideLoading();
+  }
+}
+
 function loadVisibleFields(defaults) {
   try {
     const saved = JSON.parse(localStorage.getItem(COLS_KEY));
@@ -88,7 +186,7 @@ function saveVisibleFields(fields) {
   localStorage.setItem(COLS_KEY, JSON.stringify(fields));
 }
 
-function buildDynamicColumns() {
+function buildAnnotationsColumns() {
   const cols = [
     {
       title: "Status",
@@ -97,70 +195,79 @@ function buildDynamicColumns() {
       formatter: statusFormatter,
       headerSort: true,
     },
-  ];
-
-  for (const field of visibleFields) {
-    if (["status", "Actions", "Comments"].includes(field)) continue;
-    if (field === "title") {
-      cols.push({
-        title: "Title",
-        field: "title",
-        minWidth: 300,
-        tooltip: true,
-      });
-    } else if (field === "doi") {
-      cols.push({ title: "DOI", field: "doi", width: 220, tooltip: true });
-    } else if (field === "annotator") {
-      cols.push({ title: "Annotator", field: "annotator", width: 150 });
-    } else if (field === "Latest Comment") {
-      cols.push({
-        title: "Latest Comment",
-        field: "latest_comment",
-        minWidth: 200,
-        tooltip: true,
-      });
-    } else {
-      const fieldKey = field.replace(/\s+/g, "_").toLowerCase();
-      cols.push({
-        title: field,
-        field: fieldKey,
-        minWidth: 160,
-        tooltip: true,
-      });
-    }
-  }
-
-  cols.push({
-    title: "Actions",
-    width: 100,
-    hozAlign: "center",
-    formatter: actionFormatter,
-    cellClick: handleReopenClick,
-    headerSort: false,
-  });
-
-  cols.push({
-    title: "Comments",
-    field: "__comments",
-    width: 130,
-    hozAlign: "center",
-    headerSort: false,
-    formatter: () =>
-      `<button class="btn-primary text-xs py-1 px-2">Comment</button>`,
-    cellClick: (e, cell) => {
-      const row = cell.getRow().getData();
-      openCommentsModal(row.doi, row.title);
+    { title: "Title", field: "title", minWidth: 300, tooltip: true },
+    { title: "DOI", field: "doi", width: 220, tooltip: true },
+    { title: "Annotator", field: "annotator", width: 150 },
+    {
+      title: "Latest Comment",
+      field: "latest_comment",
+      minWidth: 200,
+      tooltip: true,
     },
-  });
-
+    {
+      title: "Actions",
+      width: 100,
+      hozAlign: "center",
+      formatter: actionFormatter,
+      cellClick: handleActionClick,
+      headerSort: false,
+    },
+    {
+      title: "Comments",
+      field: "__comments",
+      width: 130,
+      hozAlign: "center",
+      headerSort: false,
+      formatter: () =>
+        `<button class="btn-primary text-xs py-1 px-2">Comment</button>`,
+      cellClick: (e, cell) => {
+        const row = cell.getRow().getData();
+        openCommentsModal(row.doi, row.title);
+      },
+    },
+  ];
   return cols;
 }
 
-function openColumnsPicker() {
+function buildSyntheticColumns(headers = []) {
+  if (!headers.length) return [];
+  return headers.map((header) => {
+    const col = {
+      title: header.charAt(0).toUpperCase() + header.slice(1), // Capitalize
+      field: header,
+      minWidth: 150,
+      tooltip: true,
+      headerFilter: "input",
+    };
+    if (header === "title" || header === "abstract") {
+      col.minWidth = 300;
+    }
+    if (header === "doi") {
+      col.width = 220;
+    }
+    return col;
+  });
+}
+
+async function openColumnsPicker() {
+  // --- FIX: Fetch headers if they don't exist yet ---
+  if (!allHeaders.length && state.currentDataset) {
+    try {
+      const payload = await api.getSheetData(state.currentDataset);
+      allHeaders = (payload.headers || [])
+        .map((h) => String(h || "").trim())
+        .filter(Boolean);
+    } catch (error) {
+      showToastNotification("Could not fetch column data.", "error");
+      return;
+    }
+  }
+
   if (!allHeaders.length) {
-    showToastNotification("Load a sheet first.", "error");
+    showToastNotification("Load a sheet and dataset first.", "error");
     return;
   }
+
   const pickerId = "columns-picker-modal";
   if (document.getElementById(pickerId)) return;
   const wrapper = document.createElement("div");
@@ -169,13 +276,13 @@ function openColumnsPicker() {
   wrapper.style.cssText =
     "position:fixed; right:2rem; top:8rem; z-index:9999; width:320px;";
   wrapper.innerHTML = `
-    <h3 class="text-xl font-bold mb-4">Choose Columns</h3>
-    <div id="col-list" class="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-2"></div>
-    <div class="flex justify-end gap-2 mt-4 pt-4 border-t border-white/20">
-      <button id="col-cancel" class="btn-secondary">Close</button>
-      <button id="col-apply" class="btn-primary">Apply</button>
-    </div>
-  `;
+        <h3 class="text-xl font-bold mb-4">Choose Columns</h3>
+        <div id="col-list" class="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-2"></div>
+        <div class="flex justify-end gap-2 mt-4 pt-4 border-t border-white/20">
+        <button id="col-cancel" class="btn-secondary">Close</button>
+        <button id="col-apply" class="btn-primary">Apply</button>
+        </div>
+    `;
   document.body.appendChild(wrapper);
   const list = wrapper.querySelector("#col-list");
   const pickable = allHeaders.filter((h) => !["status"].includes(h));
@@ -198,7 +305,7 @@ function openColumnsPicker() {
       });
     visibleFields = selectedFields;
     saveVisibleFields(visibleFields);
-    table.setColumns(buildDynamicColumns());
+    table.setColumns(buildAnnotationsColumns());
     wrapper.remove();
   };
 }
@@ -245,10 +352,7 @@ function renderThread(items) {
       <div class="text-sm text-gray-400 mb-1">
         <strong class="text-white">${
           it.annotator || "Anon"
-        }</strong> &middot; ${
-          // --- FIX: Display the timestamp string directly instead of trying to parse it ---
-          it.timestamp || ""
-        }
+        }</strong> &middot; ${it.timestamp || ""}
       </div>
       <div class="text-gray-200 whitespace-pre-wrap">${escapeHtml(
         it.comment || ""
@@ -308,44 +412,59 @@ function escapeHtml(s) {
   );
 }
 
-function initializeTable() {
+function initializeOrReinitializeTable(columns, placeholder) {
   const container = document.getElementById("dashboard-table-container");
-  if (!container) return;
+  if (table) {
+    table.destroy();
+  }
   table = new Tabulator(container, {
-    height: "calc(100vh - 280px)",
-    layout: "fitColumns",
-    placeholder: "No data available. Select a sheet and dataset.",
-    columns: [],
+    height: "calc(100vh - 320px)",
+    layout: "fitData",
+    placeholder: placeholder,
+    columns: columns,
   });
 }
 
-async function loadData() {
-  if (!table || !state.currentDataset) {
-    table && table.clearData();
+async function loadAnnotationsData() {
+  if (!state.currentDataset) {
+    initializeOrReinitializeTable([], "Select a dataset to view annotations.");
     return;
   }
   try {
+    initializeOrReinitializeTable([], "Loading Annotations...");
     const payload = await api.getSheetData(state.currentDataset);
-    if (
-      !allHeaders.length ||
-      JSON.stringify(allHeaders) !== JSON.stringify(payload.headers)
-    ) {
-      allHeaders = (payload.headers || [])
-        .map((h) => String(h || "").trim())
-        .filter(Boolean);
-      const defaults = ["title", "doi", "annotator", "Latest Comment"].filter(
-        (f) => allHeaders.includes(f)
-      );
-      visibleFields = loadVisibleFields(
-        defaults.length ? defaults : ["title", "doi"]
-      );
-      table.setColumns(buildDynamicColumns());
-    }
+    allHeaders = (payload.headers || [])
+      .map((h) => String(h || "").trim())
+      .filter(Boolean);
+    table.setColumns(buildAnnotationsColumns());
     table.setData(payload.rows || []);
   } catch (err) {
-    console.error("Error loading data into table:", err);
-    showToastNotification("Could not load dashboard data.", "error");
-    table && table.clearData();
+    console.error("Error loading annotation data into table:", err);
+    showToastNotification("Could not load annotation data.", "error");
+    if (table) initializeOrReinitializeTable([], "Error loading data.");
+  }
+}
+
+async function loadSyntheticData() {
+  try {
+    initializeOrReinitializeTable([], "Loading Synthetic Data...");
+    const payload = await api.getSyntheticSheetData();
+    table.setColumns(buildSyntheticColumns(payload.headers || []));
+    table.setData(payload.rows || []);
+  } catch (err) {
+    console.error("Error loading synthetic data into table:", err);
+    showToastNotification("Could not load synthetic data.", "error");
+    if (table) initializeOrReinitializeTable([], "Error loading data.");
+  }
+}
+
+function loadData() {
+  if (activeDashboardTab === "annotations") {
+    document.getElementById("columnsBtn").style.display = "block";
+    loadAnnotationsData();
+  } else {
+    document.getElementById("columnsBtn").style.display = "none";
+    loadSyntheticData();
   }
 }
 
@@ -354,22 +473,37 @@ function setupEventListeners() {
   document
     .getElementById("dashboard-refresh-btn")
     .addEventListener("click", loadData);
+
   const searchInput = document.getElementById("dashboard-search");
   searchInput.addEventListener("keyup", function () {
     const filterValue = searchInput.value;
-    if (filterValue) {
-      table.setFilter([
-        [
-          { field: "title", type: "like", value: filterValue },
-          { field: "doi", type: "like", value: filterValue },
-        ],
-      ]);
-    } else {
-      table.clearFilter();
-    }
+    table.setFilter(
+      filterValue
+        ? [
+            [
+              { field: "title", type: "like", value: filterValue },
+              { field: "doi", type: "like", value: filterValue },
+            ],
+          ]
+        : []
+    );
   });
+
   const colsBtn = document.getElementById("columnsBtn");
   if (colsBtn) colsBtn.addEventListener("click", openColumnsPicker);
+
+  // Tab switching logic
+  document.querySelectorAll(".dashboard-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      activeDashboardTab = tab.dataset.tab;
+      document
+        .querySelectorAll(".dashboard-tab")
+        .forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      loadData();
+    });
+  });
+
   ensureCommentsModal();
   listenersAttached = true;
 }
@@ -377,9 +511,6 @@ function setupEventListeners() {
 export function initializeDashboard(_state, _viewManager) {
   state = _state;
   viewManager = _viewManager;
-  if (!table) {
-    initializeTable();
-  }
   setupEventListeners();
   return {
     loadData,

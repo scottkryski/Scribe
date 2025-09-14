@@ -156,6 +156,7 @@
                         <!-- Sticky Bottom Buttons -->
                         <div class="flex space-x-4 mt-6">
                             <button id="submit-btn" type="button" class="flex-1 glass-hover bg-gradient-to-r from-green-500 to-green-600 text-white py-3 px-6 rounded-lg font-semibold">Submit</button>
+                            <button id="submit-augment-btn" type="button" class="flex-1 glass-hover bg-gradient-to-r from-blue-500 to-teal-600 text-white py-3 px-6 rounded-lg font-semibold">Submit & Augment</button>
                             <button id="skip-btn" type="button" class="flex-1 glass-hover bg-gradient-to-r from-gray-500 to-gray-600 text-white py-3 px-6 rounded-lg font-semibold">Skip</button>
                         </div>
                     </form>
@@ -244,6 +245,14 @@
                                     <p class="text-xs text-gray-400 mt-1">Note: gemini-2.5-flash-lite is recommended for its balance of speed, accuracy, and higher free API limits.</p>
                                     <p class="text-xs text-gray-400 mt-1">Flash and Pro may provide slightly higher accuracy at the cost of lower limits. 2.0 models should only be used as a fallback.</p>
                                     <p class="text-xs text-gray-400 mt-1">Gemma models are added for local testing purposes and their accuracy is likely to suffer when given so much context.</p>
+                                </div>
+                            </div>
+                            <!-- Augment Sample Count -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 items-center gap-4 pt-6 border-t border-white/10">
+                                <label for="augment-sample-count" class="font-medium">Synthetic Samples:</label>
+                                <div class="md:col-span-2">
+                                    <input type="number" id="augment-sample-count" class="w-full p-2 bg-white bg-opacity-20 rounded-lg text-white" value="3" min="1" max="10">
+                                    <p class="text-xs text-gray-400 mt-1">Number of synthetic papers to generate after submitting (1-10).</p>
                                 </div>
                             </div>
                             <div class="grid grid-cols-1 md:grid-cols-3 items-center gap-4 pt-6 border-t border-white/10">
@@ -539,7 +548,12 @@
                 </div>
             </header>
             <main class="glass-effect rounded-3xl p-6 fade-in text-white">
-                <!-- FIX START: Grouped the buttons into their own flex container -->
+                <!-- Dashboard Tabs -->
+                <div class="flex border-b border-white/10 mb-2 gap-5">
+                    <button id="dashboard-tab-annotations" data-tab="annotations" class="btn-primary dashboard-tab active">Human Annotations</button>
+                    <button id="dashboard-tab-synthetic" data-tab="synthetic" class="btn-primary dashboard-tab">Synthetic Data</button>
+                </div>
+                
                 <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
                     <input id="dashboard-search" type="text" placeholder="Search by title or DOI..." class="w-full md:w-1/3 p-2 bg-black bg-opacity-20 rounded-lg text-white placeholder-gray-400">
                     <div class="flex items-center gap-4">
@@ -547,7 +561,6 @@
                         <button id="dashboard-refresh-btn" class="btn-primary">Refresh</button>
                     </div>
                 </div>
-                <!-- FIX END -->
                 <div id="dashboard-table-container">
                     <!-- Tabulator will create the table here -->
                 </div>

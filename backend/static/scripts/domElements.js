@@ -16,6 +16,7 @@ export let dashboardView = null; // New
 // --- Controls & Inputs ---
 export let datasetSelector = null;
 export let submitBtn = null;
+export let submitAugmentBtn = null;
 export let skipBtn = null;
 export let highlightToggleButtons = null;
 export let annotatorInput = null;
@@ -84,6 +85,7 @@ export function init() {
   // --- Controls & Inputs ---
   datasetSelector = document.getElementById("dataset-selector");
   submitBtn = document.getElementById("submit-btn");
+  submitAugmentBtn = document.getElementById("submit-augment-btn");
   skipBtn = document.getElementById("skip-btn");
   highlightToggleButtons = document.querySelectorAll(".highlight-toggle-btn");
   annotatorInput = document.getElementById("annotator-name");

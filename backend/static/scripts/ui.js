@@ -396,6 +396,56 @@ export function setupContextToggles() {
 export function setupFieldActionControls() {
   const container = document.getElementById("annotation-fields-container");
   if (container) {
+    // --- START FIX for Tooltip ---
+    container.addEventListener("mouseover", (event) => {
+      const reasoningBtn = event.target.closest(".reasoning-bubble-btn");
+      const tooltip = dom.reasoningTooltip;
+
+      if (reasoningBtn && reasoningBtn.dataset.reasoningText) {
+        tooltip.innerHTML = reasoningBtn.dataset.reasoningText;
+        tooltip.style.display = "block"; // Temporarily display to get dimensions
+
+        const btnRect = reasoningBtn.getBoundingClientRect();
+        const tooltipRect = tooltip.getBoundingClientRect();
+
+        let top = btnRect.top - tooltipRect.height - 8; // 8px gap above
+        let left = btnRect.left + btnRect.width / 2 - tooltipRect.width / 2;
+
+        // Boundary checks
+        if (top < 0) {
+          // If it goes off the top
+          top = btnRect.bottom + 8; // Move below
+        }
+        if (left < 5) {
+          // If it goes off the left
+          left = 5;
+        }
+        if (left + tooltipRect.width > window.innerWidth) {
+          // If it goes off the right
+          left = window.innerWidth - tooltipRect.width - 5;
+        }
+
+        tooltip.style.top = `${top + window.scrollY}px`;
+        tooltip.style.left = `${left + window.scrollX}px`;
+        tooltip.classList.add("visible");
+      }
+    });
+
+    container.addEventListener("mouseout", (event) => {
+      const reasoningBtn = event.target.closest(".reasoning-bubble-btn");
+      if (reasoningBtn) {
+        const tooltip = dom.reasoningTooltip;
+        tooltip.classList.remove("visible");
+        // Use timeout to allow fade-out transition before setting display to none
+        setTimeout(() => {
+          if (!tooltip.classList.contains("visible")) {
+            tooltip.style.display = "none";
+          }
+        }, 300);
+      }
+    });
+    // --- END FIX for Tooltip ---
+
     container.addEventListener("click", (event) => {
       const clearBtn = event.target.closest(".clear-ai-btn");
       if (clearBtn && clearBtn.dataset.clearTarget) {
