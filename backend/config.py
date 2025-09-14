@@ -14,7 +14,7 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 # --- Configuration ---
-LOCK_TIMEOUT_SECONDS = 7200  # 2 hours
+LOCK_TIMEOUT_SECONDS = 172800  # 2 hours
 
 # --- NEW: Define script's parent directory for robust pathing ---
 _SCRIPT_DIR = Path(__file__).resolve().parent
