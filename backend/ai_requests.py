@@ -203,26 +203,64 @@ def _generate_augmentation_prompt(title: str, abstract: str, annotations: Dict[s
             logic_summary += f'- The paper MUST be classifiable as **"{annotation_value}"** for the field **"{field_label}"**.\\n'
 
     prompt = f"""
-**ROLE AND GOAL:**
-You are a creative expert research author and data scientist. Your goal is to generate a varied and challenging synthetic dataset for training an AI model. You will create {sample_count} new and unique variations of a research paper's title and abstract.
+**ROLE AND GOAL**
+You are a creative research author and data scientist. Generate {sample_count} varied, challenging synthetic versions of a paper’s title and abstract for model training.
 
-**SOURCE MATERIAL:**
-- **Original Title:** "{title}"
-- **Original Abstract:** "{abstract}"
+**SOURCE MATERIAL**
+- Original Title: "{title}"
+- Original Abstract: "{abstract}"
 
-**CORE DIRECTIVE:**
-Every single synthetic abstract you generate **MUST STRICTLY ADHERE** to the following classification logic. This is the most important rule.
+**CLASSIFICATION GROUND TRUTH (DO NOT STATE)**
+This dataset trains downstream classifiers. Every synthetic abstract must STRICTLY satisfy the following classification logic without ever stating it or using giveaway terms:
 {logic_summary}
 
-**GENERATION STRATEGY & VARYING DIFFICULTY:**
-You must generate {sample_count} samples that progressively increase in difficulty for an AI to classify. The goal is to force the AI to "read between the lines" and rely on inference rather than simple keywords.
+**AUTO-LEAKAGE GUARDRAILS (NO EXTERNAL LIST)**
+Before writing, silently build an internal “do-not-use” list:
+1) Add any label names, rubric names, and key phrases that appear in {logic_summary} (e.g., “human subjects”, “animal study”, “experiment”, “personal data”, etc.). Include their common inflections (plural, -ed/-ing) and synonyms.
+2) Add any explicit meta-labels (e.g., “this triggers…”, “classified as…”, “label: …”).
+3) Add these universal giveaways and their inflections/synonyms:
+   - experiment, randomized, RCT, control group, placebo, manipulation, intervention
+   - participants, subjects, human sample, informed consent, IRB, ethics board
+   - mouse, mice, rat, murine, animal model, zebrafish, drosophila
+   - personal data, PII, sensitive data, identifiers, de-identified, GDPR, HIPAA
+Do NOT output the list. Never use any item on the list in the final text.
 
-1.  **First Sample (Easy Difficulty):** Create a direct paraphrase of the original title and abstract. The information should be presented clearly and explicitly, making it easy to classify.
-2.  **Intermediate Sample(s) (Medium Difficulty):** Rewrite the abstract to be more subtle. **IMPLY** the classifications. For example, instead of saying "we studied 100 human participants," you might write "we recruited one hundred undergraduates from the university psychology program." Instead of "this was an experiment," describe the setup: "the cohort was divided into a control and a variable group." You must NOT use obvious or explicit keywords related to the classification logic.
-3.  **Final Sample (Hard Difficulty / "Curveball"):** Be the most creative with this sample. You can significantly change the writing style, use more complex vocabulary, or even slightly alter the research context (e.g., a similar study on a different but related population) while **STILL PERFECTLY ADHERING** to the core classification logic. This sample should be the most challenging to classify correctly and require deep contextual understanding.
+**DIFFICULTY GRADATION**
+Create {sample_count} samples that increase in classification difficulty:
 
-**OUTPUT FORMAT:**
-You MUST respond with a single, valid JSON object. This object must contain a single key, "synthetic_papers", which is a list of JSON objects. Each object in the list must have exactly two keys: "title" and "abstract". Do not add any explanatory text, markdown formatting, or comments before or after the JSON object.
+1) Easy: Clear paraphrase of title+abstract. Keep signals explicit but expressed via concrete description rather than banned terms.
+
+2) Medium (one or more): Make cues indirect.
+   - Prefer operational details over label words (e.g., describe recruitment, allocation, procedures, instruments, or record types without naming the category).
+   - Vary structure (methods-first; results-first; background-heavy).
+   - Avoid canonical keywords; use metonymy or paraphrastic cues.
+
+3) Hard (“curveball”): Most oblique yet still unambiguously consistent with the logic.
+   - Slightly shift context (closely related population/setting) while preserving the same ground truth.
+   - Use complex syntax, hedging, and indirect evidence (e.g., describe assignment via operations, measurement via tools).
+   - Keep lexical overlap with the original abstract ≤ ~25% (approximate).
+
+**STYLE & VARIETY**
+- Across the set, vary narrative voice (active/passive), emphasis (background/methods/results), and register (scholarly vs plain-language summary).
+- Length: 130–220 words per abstract (±10%) unless the source is much shorter; then keep roughly proportional.
+- Titles: 8–16 words; avoid colon clichés unless the source used one.
+
+**CONSISTENCY & PLAUSIBILITY**
+- Preserve core study intent and classification truth; keep numbers/entities plausible and internally consistent.
+
+**OUTPUT FORMAT (STRICT)**
+Return a single valid JSON object with one key: "synthetic_papers".
+Its value is a list of exactly {sample_count} objects, each with exactly two keys:
+- "title": string
+- "abstract": string
+No extra keys. No markdown or commentary—JSON only.
+
+**FINAL SELF-CHECK (SILENT)**
+Before returning JSON:
+- Verify every sample adheres to {logic_summary}.
+- Verify none of your internal do-not-use terms (or their inflections/synonyms) appear.
+- Verify difficulty progression and style variety.
+- If any check fails, regenerate that sample and re-check.
 """
     return prompt
 
