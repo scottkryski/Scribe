@@ -162,6 +162,18 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
 
 @router.post("/submit-annotation")
 def submit_annotation(submission: AnnotationSubmission):
+    """
+    Submits an annotation to the Google Sheet.
+
+    Args:
+        submission (AnnotationSubmission): The annotation data to be submitted.
+
+    Returns:
+        dict: A JSON response containing the status of the submission and the DOI of the paper.
+
+    Raises:
+        HTTPException: If an error occurs while submitting the annotation to the Google Sheet.
+    """
     print(f"LOG: Received annotation submission for DOI: {submission.doi} by annotator: {submission.annotator}")
     if not state.worksheet:
         raise HTTPException(status_code=400, detail="No Google Sheet is currently connected.")
@@ -194,7 +206,12 @@ def submit_annotation(submission: AnnotationSubmission):
         except (ValueError, APIError):
             cell = None
 
-        row_values = [flat_submission.get(h, "") for h in headers]
+        row_values = []
+        for header in headers:
+            value = flat_submission.get(header, "")
+            if value is None:
+                value = ""
+            row_values.append(value)
 
         if cell:
             state.worksheet.update(f'A{cell.row}', [row_values], value_input_option='USER_ENTERED')
