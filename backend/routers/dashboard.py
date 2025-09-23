@@ -358,8 +358,20 @@ async def get_detailed_stats():
     dataset_counts = Counter()
     status_counts = Counter()
 
+    # Ethics specific counters
+    ethics_ethicsDeclaration_counts = Counter()
+    ethics_fields_counts = Counter()
+
     headers = list(records[0].keys()) if records else []
     boolean_fields = [h for h in headers if h.startswith("trigger_") and not h.endswith("_context")]
+    ethics_boolean_fields = [h for h in headers if h.startswith("ethics_COI") and not h.endswith("_context")]
+    ethics_fields = [
+        h
+        for h in headers
+        if h.startswith("ethics_")
+        and not h.endswith("_context")
+        and h not in ethics_boolean_fields
+    ]
     
     for record in records:
         for field in boolean_fields:
@@ -367,6 +379,21 @@ async def get_detailed_stats():
                 overall_counts[field] = Counter()
             value = str(record.get(field, "")).upper()
             if value in ["TRUE", "FALSE"]:
+                overall_counts[field][value] += 1
+
+        for field in ethics_boolean_fields:
+            if field not in overall_counts:
+                overall_counts[field] = Counter()
+            value = str(record.get(field, "")).upper()
+            if value in ["TRUE", "FALSE"]:
+                overall_counts[field][value] += 1
+
+        for field in ethics_fields:
+            if field not in overall_counts:
+                overall_counts[field] = Counter()
+            raw_value = record.get(field, "")
+            value = str(raw_value).strip()
+            if value:
                 overall_counts[field][value] += 1
 
         doc_type = record.get("attribute_docType")

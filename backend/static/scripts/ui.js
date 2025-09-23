@@ -606,21 +606,66 @@ export function renderDetailedStats(stats, summary) {
 
   for (const key in overall_counts) {
     const counts = overall_counts[key] || {};
-    const trueCount = counts["TRUE"] || 0;
-    const totalForField = (counts["TRUE"] || 0) + (counts["FALSE"] || 0);
-    const percentage =
-      totalForField > 0 ? ((trueCount / totalForField) * 100).toFixed(1) : 0;
+    const entries = Object.entries(counts).filter(([, count]) => count > 0);
+    if (entries.length === 0) continue;
+
+    const isBooleanField = entries.every(([value]) =>
+      ["TRUE", "FALSE"].includes(value)
+    );
+
+    if (isBooleanField) {
+      const trueCount = counts["TRUE"] || 0;
+      const falseCount = counts["FALSE"] || 0;
+      const totalForField = trueCount + falseCount;
+      const percentage =
+        totalForField > 0 ? ((trueCount / totalForField) * 100).toFixed(1) : 0;
+
+      const card = `
+              <div class="glass-effect p-4 rounded-xl">
+                  <div class="flex justify-between items-center mb-2">
+                      <span class="font-semibold text-gray-200 truncate pr-2">${key}</span>
+                      <span class="font-bold text-white">${trueCount}</span>
+                  </div>
+                  <div class="w-full bg-black bg-opacity-20 rounded-full h-2.5">
+                      <div class="bg-purple-500 h-2.5 rounded-full" style="width: ${percentage}%"></div>
+                  </div>
+                  <p class="text-right text-sm text-gray-400 mt-1">${percentage}% TRUE</p>
+              </div>
+          `;
+      breakdownContainer.innerHTML += card;
+      continue;
+    }
+
+    const totalForField = entries.reduce((sum, [, count]) => sum + count, 0);
+    const sortedEntries = entries.sort(([, a], [, b]) => b - a);
+    const rowsHtml = sortedEntries
+      .map(([value, count]) => {
+        const label = value || "Unspecified";
+        const percentageNumber = totalForField > 0 ? (count / totalForField) * 100 : 0;
+        const percentageLabel = percentageNumber.toFixed(1);
+        return `
+              <div>
+                  <div class="flex justify-between items-center text-sm mb-1">
+                      <span class="text-gray-200 truncate pr-2">${label}</span>
+                      <span class="text-gray-300 flex-shrink-0">${count} (${percentageLabel}%)</span>
+                  </div>
+                  <div class="w-full bg-black bg-opacity-20 rounded-full h-2">
+                      <div class="bg-teal-400 h-2 rounded-full" style="width: ${percentageLabel}%"></div>
+                  </div>
+              </div>
+          `;
+      })
+      .join("");
 
     const card = `
             <div class="glass-effect p-4 rounded-xl">
                 <div class="flex justify-between items-center mb-2">
                     <span class="font-semibold text-gray-200 truncate pr-2">${key}</span>
-                    <span class="font-bold text-white">${trueCount}</span>
+                    <span class="font-bold text-white">${totalForField}</span>
                 </div>
-                <div class="w-full bg-black bg-opacity-20 rounded-full h-2.5">
-                    <div class="bg-purple-500 h-2.5 rounded-full" style="width: ${percentage}%"></div>
+                <div class="space-y-2">
+                    ${rowsHtml}
                 </div>
-                <p class="text-right text-sm text-gray-400 mt-1">${percentage}% TRUE</p>
             </div>
         `;
     breakdownContainer.innerHTML += card;
