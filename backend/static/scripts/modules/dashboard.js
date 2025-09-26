@@ -186,8 +186,11 @@ function saveVisibleFields(fields) {
   localStorage.setItem(COLS_KEY, JSON.stringify(fields));
 }
 
+// --- START FIX for Column Filter ---
+// This function is now dynamic and builds columns based on the 'visibleFields' array.
 function buildAnnotationsColumns() {
-  const cols = [
+  // These columns are always present and not user-configurable
+  const staticStartCols = [
     {
       title: "Status",
       field: "status",
@@ -195,15 +198,9 @@ function buildAnnotationsColumns() {
       formatter: statusFormatter,
       headerSort: true,
     },
-    { title: "Title", field: "title", minWidth: 300, tooltip: true },
-    { title: "DOI", field: "doi", width: 220, tooltip: true },
-    { title: "Annotator", field: "annotator", width: 150 },
-    {
-      title: "Latest Comment",
-      field: "latest_comment",
-      minWidth: 200,
-      tooltip: true,
-    },
+  ];
+
+  const staticEndCols = [
     {
       title: "Actions",
       width: 100,
@@ -226,8 +223,42 @@ function buildAnnotationsColumns() {
       },
     },
   ];
-  return cols;
+
+  // Create column definitions from the user-selected visibleFields array
+  const dynamicCols = visibleFields.map((header) => {
+    // The 'field' must match the key in the data object from the API (lowercase_with_underscores)
+    const fieldKey = header.replace(/ /g, "_").toLowerCase();
+
+    const colDef = {
+      title: header,
+      field: fieldKey,
+      tooltip: true,
+    };
+
+    // Apply specific widths/minWidths for known columns to preserve original layout
+    switch (header.toLowerCase()) {
+      case "title":
+        colDef.minWidth = 300;
+        break;
+      case "doi":
+        colDef.width = 220;
+        break;
+      case "annotator":
+        colDef.width = 150;
+        break;
+      case "latest comment":
+        colDef.minWidth = 200;
+        break;
+      default:
+        colDef.minWidth = 150; // A sensible default for other fields
+        break;
+    }
+    return colDef;
+  });
+
+  return [...staticStartCols, ...dynamicCols, ...staticEndCols];
 }
+// --- END FIX for Column Filter ---
 
 function buildSyntheticColumns(headers = []) {
   if (!headers.length) return [];
@@ -511,6 +542,15 @@ function setupEventListeners() {
 export function initializeDashboard(_state, _viewManager) {
   state = _state;
   viewManager = _viewManager;
+  // --- START FIX for Column Filter ---
+  // Load saved column preferences or set defaults when the dashboard is initialized.
+  visibleFields = loadVisibleFields([
+    "Title",
+    "DOI",
+    "Annotator",
+    "Latest Comment",
+  ]);
+  // --- END FIX for Column Filter ---
   setupEventListeners();
   return {
     loadData,
