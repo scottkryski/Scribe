@@ -137,32 +137,43 @@ function resetField(fieldElement) {
   }
 }
 async function displayPaper(paper) {
-  state.currentPaper = paper;
-  dom.paperView.classList.remove("hidden");
-  dom.annotationView.classList.remove("hidden");
-  dom.paperContentContainer.classList.remove("hidden");
-  if (window.innerWidth >= 1024) {
-    document.getElementById("resize-handle").style.display = "flex";
-  } else {
-    document.getElementById("resize-handle").style.display = "none";
+  const suppressAutoFillForLoad = Boolean(paper?.existing_annotation);
+  if (suppressAutoFillForLoad) {
+    state.suppressAutoFill = true;
   }
-  const { originalAbstractHTML, originalFullTextHTML } = await ui.renderPaper(
-    paper
-  );
-  startLockTimer();
-  state.originalAbstractHTML = originalAbstractHTML;
-  state.originalFullTextHTML = originalFullTextHTML;
-  state.activeHighlightIds.clear();
-  document
-    .querySelectorAll(".highlight-toggle-btn")
-    .forEach((btn) => btn.classList.remove("active"));
-  highlighting.updateAllHighlights(
-    state.activeHighlightIds,
-    state.originalAbstractHTML,
-    state.originalFullTextHTML,
-    state.activeTemplate
-  );
-  ui.hideLoading();
+
+  try {
+    state.currentPaper = paper;
+    dom.paperView.classList.remove("hidden");
+    dom.annotationView.classList.remove("hidden");
+    dom.paperContentContainer.classList.remove("hidden");
+    if (window.innerWidth >= 1024) {
+      document.getElementById("resize-handle").style.display = "flex";
+    } else {
+      document.getElementById("resize-handle").style.display = "none";
+    }
+    const { originalAbstractHTML, originalFullTextHTML } = await ui.renderPaper(
+      paper
+    );
+    startLockTimer();
+    state.originalAbstractHTML = originalAbstractHTML;
+    state.originalFullTextHTML = originalFullTextHTML;
+    state.activeHighlightIds.clear();
+    document
+      .querySelectorAll(".highlight-toggle-btn")
+      .forEach((btn) => btn.classList.remove("active"));
+    highlighting.updateAllHighlights(
+      state.activeHighlightIds,
+      state.originalAbstractHTML,
+      state.originalFullTextHTML,
+      state.activeTemplate
+    );
+    ui.hideLoading();
+  } finally {
+    if (suppressAutoFillForLoad) {
+      state.suppressAutoFill = false;
+    }
+  }
 }
 async function fetchAndDisplayNextPaper(retryCount = 0, skipDoi = null) {
   if (!state.currentDataset) return;
@@ -538,6 +549,9 @@ export function initializeActions(_state) {
         const triggerEl = document.getElementById(field.id);
         if (!triggerEl) return;
         triggerEl.addEventListener("change", (e) => {
+          if (state.suppressAutoFill) {
+            return;
+          }
           const triggerId = e.target.id;
           const currentValue = e.target.value;
           document

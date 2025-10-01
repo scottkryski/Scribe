@@ -65,6 +65,7 @@ document.addEventListener("DOMContentLoaded", () => {
     currentFilterQuery: "",
     sheetTemplateTimestamp: null,
     templatePollInterval: null,
+    suppressAutoFill: false,
   };
 
   const actions = initializeActions(state);
