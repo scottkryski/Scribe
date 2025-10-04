@@ -552,6 +552,7 @@
                 <div class="flex border-b border-white/10 mb-2 gap-5">
                     <button id="dashboard-tab-annotations" data-tab="annotations" class="btn-primary dashboard-tab active">Human Annotations</button>
                     <button id="dashboard-tab-synthetic" data-tab="synthetic" class="btn-primary dashboard-tab">Synthetic Data</button>
+                    <button id="dashboard-tab-reviews" data-tab="reviews" class="btn-primary dashboard-tab">Review Queue</button>
                 </div>
                 
                 <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
@@ -563,6 +564,33 @@
                 </div>
                 <div id="dashboard-table-container">
                     <!-- Tabulator will create the table here -->
+                </div>
+                <div id="dashboard-reviews-board" class="hidden grid grid-cols-1 md:grid-cols-3 gap-4 h-[calc(100vh-320px)]">
+                    
+                    <!-- Column 1: Pending Review -->
+                    <div class="kanban-column flex flex-col">
+                        <h3 class="kanban-header">Pending Review (<span id="pending-count">0</span>)</h3>
+                        <div id="pending-reviews-col" class="kanban-content">
+                            <!-- Pending cards will be added here -->
+                        </div>
+                    </div>
+
+                    <!-- Column 2: Confirmed Human -->
+                    <div class="kanban-column flex flex-col">
+                        <h3 class="kanban-header">Confirmed Human (<span id="confirmed-human-count">0</span>)</h3>
+                        <div id="confirmed-human-col" class="kanban-content">
+                            <!-- Confirmed Human cards will be added here -->
+                        </div>
+                    </div>
+
+                    <!-- Column 3: Corrected to AI -->
+                    <div class="kanban-column flex flex-col">
+                        <h3 class="kanban-header">Corrected to AI (<span id="corrected-ai-count">0</span>)</h3>
+                        <div id="corrected-ai-col" class="kanban-content">
+                            <!-- Corrected to AI cards will be added here -->
+                        </div>
+                    </div>
+
                 </div>
             </main>
         </div>
@@ -623,7 +651,66 @@
     </div>
 
     <div id="reasoning-tooltip" role="tooltip" class="z-50"></div>
-    
+
+    <div id="modal-overlay" class="hidden fixed inset-0 bg-black bg-opacity-70 z-40"></div>
+    <div id="reasoning-modal" class="hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 glass-effect rounded-2xl p-6 text-white w-full max-w-lg">
+        <h3 id="reasoning-modal-title" class="text-xl font-bold mb-4">Provide Reasoning</h3>
+        <textarea id="reasoning-modal-input" class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white placeholder-gray-400" rows="4" placeholder="Briefly explain your decision..."></textarea>
+        <div class="flex justify-end gap-2 mt-4">
+            <button id="reasoning-modal-cancel" class="btn-secondary">Cancel</button>
+            <button id="reasoning-modal-submit" class="btn-primary">Submit</button>
+        </div>
+    </div>
+    <template id="review-card-template">
+        <div class="review-card glass-effect rounded-2xl p-4 text-white border border-transparent transition-all">
+            <!-- Header -->
+            <div class="flex justify-between items-start gap-4 mb-3">
+                <div class="flex-grow min-w-0"> <!-- Added min-w-0 for better truncation -->
+                    <p class="text-s text-gray-400 truncate" data-field="Trigger_Name"></p>
+                    <h4 class="font-bold text-lg leading-tight truncate" data-field="Title"></h4>
+                    <p class="text-sm text-gray-300 font-mono truncate" data-field="DOI"></p>
+                </div>
+                <div class="flex-shrink-0 flex items-center gap-2">
+                    <!-- ACTION BUTTONS will be added here by JS -->
+                </div>
+            </div>
+
+            <!-- Comparison -->
+            <div class="grid grid-cols-2 gap-4 mb-3">
+                <div class="text-center bg-black/20 p-3 rounded-lg">
+                    <p class="text-sm font-semibold text-gray-300">Human Label</p>
+                    <p class="text-2xl font-bold text-yellow-300" data-field="Human_Label"></p>
+                    <p class="text-xs text-gray-400 mt-1" data-field="Annotator"></p>
+                </div>
+                <div class="text-center bg-black/20 p-3 rounded-lg">
+                    <p class="text-sm font-semibold text-gray-300">AI Label</p>
+                    <p class="text-2xl font-bold text-teal-300" data-field="AI_Label"></p>
+                </div>
+            </div>
+
+            <!-- AI Reasoning -->
+            <div class="ai-reasoning-section"> <!-- Add a wrapper class -->
+                <p class="text-sm font-semibold text-gray-200 mb-1">AI's Reasoning:</p>
+                <p class="text-sm bg-black/20 p-3 rounded-lg text-gray-300" data-field="AI_Reasoning"></p>
+            </div>
+
+            <!-- Reviewer Reasoning -->
+            <div class="reviewer-reasoning-section hidden"> <!-- Hidden by default -->
+                <p class="text-sm font-semibold text-gray-200 mb-1">Reviewer's Reasoning:<span class="text-gray-400 font-normal" data-field="Reviewed_By"></span></p>
+                <p class="text-sm bg-black/20 p-3 rounded-lg text-yellow-200 border border-yellow-500/50" data-field="Reviewer_Reasoning"></p>
+            </div>
+            <!-- NEW: Collapsible Context Section -->
+            <div class="mt-3">
+                <button type="button" class="toggle-context-btn text-xs text-blue-300 hover:text-blue-200 font-semibold flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    <span>Show Context Provided to AI</span>
+                </button>
+                <div class="context-panel hidden mt-2 bg-black/20 p-3 rounded-lg">
+                    <pre class="text-xs text-gray-400 whitespace-pre-wrap"><code data-field="Relevant_Context_Provided_to_AI"></code></pre>
+                </div>
+            </div>
+        </div>
+    </template>    
     <!-- FIX: Add cache-busting query string -->
     <script type="module" src="/static/app.js?v=1.1"></script>
 </body>

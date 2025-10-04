@@ -578,6 +578,38 @@ export async function renderPaper(paper) {
     highlightMissingFields(paper.existing_annotation);
   }
 
+  const pendingCorrectionJSON = sessionStorage.getItem("pendingCorrection");
+  if (pendingCorrectionJSON) {
+    try {
+      const { fieldId, value } = JSON.parse(pendingCorrectionJSON);
+      const element = document.getElementById(fieldId);
+      if (element) {
+        // This will apply the AI's value, overwriting the human one if it exists
+        if (
+          element.type === "hidden" &&
+          element.parentElement.classList.contains("boolean-button-group")
+        ) {
+          const valueStr = value.toString();
+          if (element.value !== valueStr) {
+            const btn = element.parentElement.querySelector(
+              `.boolean-btn[data-value="${valueStr}"]`
+            );
+            if (btn) btn.click();
+          }
+        } else {
+          element.value = value;
+        }
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+        showToastNotification(
+          `AI suggestion for '${fieldId}' has been pre-filled. Please review and submit.`,
+          "info"
+        );
+      }
+    } catch (e) {
+      console.error("Failed to apply pending correction:", e);
+    }
+  }
+
   return {
     originalAbstractHTML: abstractHTML,
     originalFullTextHTML: fullTextHTML,
@@ -641,7 +673,8 @@ export function renderDetailedStats(stats, summary) {
     const rowsHtml = sortedEntries
       .map(([value, count]) => {
         const label = value || "Unspecified";
-        const percentageNumber = totalForField > 0 ? (count / totalForField) * 100 : 0;
+        const percentageNumber =
+          totalForField > 0 ? (count / totalForField) * 100 : 0;
         const percentageLabel = percentageNumber.toFixed(1);
         return `
               <div>

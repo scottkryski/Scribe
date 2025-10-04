@@ -58,7 +58,6 @@ async function performSubmit(buttonToLoad) {
     const element = document.getElementById(field.id);
     if (element) {
       let value = element.value;
-      // For boolean, convert to actual boolean if it's a string 'true'/'false'
       if (field.type === "boolean") {
         if (value === "true") value = true;
         else if (value === "false") value = false;
@@ -76,13 +75,20 @@ async function performSubmit(buttonToLoad) {
     annotator: annotatorName,
     annotations: annotations,
   };
+
   ui.setButtonLoading(buttonToLoad, true, "Submitting...");
   try {
     await api.submitAnnotation(payload);
+
+    // --- THIS BLOCK IS NOW REMOVED ---
+    // const pendingCorrectionJSON = sessionStorage.getItem('pendingCorrection');
+    // ... (all the logic inside this block) ...
+    // sessionStorage.removeItem('pendingCorrection');
+
     return { success: true, payload };
   } catch (error) {
     alert("Submission error. Please try again.");
-    ui.setButtonLoading(buttonToLoad, false, buttonToLoad.textContent); // Restore text
+    ui.setButtonLoading(buttonToLoad, false, buttonToLoad.textContent);
     return { success: false };
   }
 }

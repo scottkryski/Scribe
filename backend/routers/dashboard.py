@@ -21,6 +21,28 @@ class CommentRequest(BaseModel):
     annotator: str
     comment: str
 
+class ResolveReviewRequest(BaseModel):
+    doi: str
+    trigger_name: str
+    reviewed_by: str
+    resolution: str # e.g., "Confirmed Human", "Corrected to AI", or "Pending"
+    reasoning: Optional[str]
+
+def _get_reviews_worksheet():
+    """Gets the 'Reviews' worksheet, returning None if it does not exist."""
+    if not state.worksheet:
+        print("WARN: Cannot get reviews worksheet, no main sheet connected.")
+        return None
+    try:
+        ss = state.worksheet.spreadsheet
+        return ss.worksheet("Reviews")
+    except gspread.WorksheetNotFound:
+        print("LOG: 'Reviews' worksheet not found, which is acceptable.")
+        return None
+    except Exception as e:
+        print(f"ERROR: Could not get 'Reviews' worksheet: {e}")
+        return None
+
 def _get_comments_worksheet():
     """Gets the 'Comments' worksheet, creating it if it does not exist."""
     if not state.worksheet:
@@ -422,3 +444,63 @@ async def get_detailed_stats():
         "leaderboard": leaderboard,
         "dataset_stats": dataset_counts
     }
+
+@router.get("/api/reviews")
+async def get_reviews_data():
+    """Fetches ALL review items from the 'Reviews' worksheet."""
+    reviews_ws = _get_reviews_worksheet()
+    if not reviews_ws:
+        return {"rows": []}
+    
+    try:
+        all_records = reviews_ws.get_all_records()
+        return {"rows": all_records} # Send everything to the frontend
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve reviews: {e}")
+
+@router.post("/api/reviews/resolve")
+async def resolve_review_item(request: ResolveReviewRequest):
+    reviews_ws = _get_reviews_worksheet()
+    if not reviews_ws:
+        raise HTTPException(status_code=404, detail="Reviews worksheet not found.")
+
+    try:
+        all_values = reviews_ws.get_all_values()
+        if not all_values:
+            raise HTTPException(status_code=404, detail="Review item not found.")
+
+        headers = all_values[0]
+        records_data = all_values[1:]
+
+        doi_col_idx = headers.index("DOI")
+        trigger_col_idx = headers.index("Trigger_Name")
+        status_col_idx = headers.index("Review_Status") + 1
+        reviewer_col_idx = headers.index("Reviewed_By") + 1
+        reasoning_col_idx = headers.index("Reviewer_Reasoning") + 1
+
+        for i, record_row in enumerate(records_data):
+            if record_row[doi_col_idx] == request.doi and record_row[trigger_col_idx] == request.trigger_name:
+                row_to_update = i + 2
+                
+                updates = []
+                # CORRECTED: Use gspread.utils to get A1 notation for the range
+                status_range = gspread.utils.rowcol_to_a1(row_to_update, status_col_idx)
+                reviewer_range = gspread.utils.rowcol_to_a1(row_to_update, reviewer_col_idx)
+                
+                updates.append({'range': status_range, 'values': [[request.resolution]]})
+                updates.append({'range': reviewer_range, 'values': [[request.reviewed_by]]})
+
+                if request.reasoning is not None:
+                    reasoning_range = gspread.utils.rowcol_to_a1(row_to_update, reasoning_col_idx)
+                    updates.append({'range': reasoning_range, 'values': [[request.reasoning]]})
+                
+                if updates:
+                    reviews_ws.batch_update(updates, value_input_option='USER_ENTERED')
+                
+                return {"status": "success", "message": "Review status updated."}
+        
+        raise HTTPException(status_code=404, detail="Review item not found.")
+    except (ValueError, IndexError) as e:
+        raise HTTPException(status_code=500, detail=f"Sheet format error. Did you add the 'Reviewer_Reasoning' column? Error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update review status: {e}")

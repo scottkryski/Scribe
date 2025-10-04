@@ -1,6 +1,11 @@
 // static/scripts/modules/dashboard.js
 import * as api from "../api.js";
-import { showToastNotification, showLoading, hideLoading } from "../ui.js";
+import {
+  showToastNotification,
+  showLoading,
+  hideLoading,
+  setButtonLoading,
+} from "../ui.js";
 
 let table = null;
 let state = {};
@@ -490,12 +495,25 @@ async function loadSyntheticData() {
 }
 
 function loadData() {
+  // ADD THIS NEW VARIABLE
+  const reviewsBoard = document.getElementById("dashboard-reviews-board");
+
+  // HIDE/SHOW the correct containers
+  document
+    .getElementById("dashboard-table-container")
+    .classList.toggle("hidden", activeDashboardTab === "reviews");
+  reviewsBoard.classList.toggle("hidden", activeDashboardTab !== "reviews"); // CHANGED
+
   if (activeDashboardTab === "annotations") {
     document.getElementById("columnsBtn").style.display = "block";
     loadAnnotationsData();
-  } else {
+  } else if (activeDashboardTab === "synthetic") {
     document.getElementById("columnsBtn").style.display = "none";
     loadSyntheticData();
+  } else if (activeDashboardTab === "reviews") {
+    // ADD THIS BLOCK
+    document.getElementById("columnsBtn").style.display = "none";
+    loadReviewsData();
   }
 }
 
@@ -535,6 +553,28 @@ function setupEventListeners() {
     });
   });
 
+  document
+    .getElementById("dashboard-reviews-board")
+    .addEventListener("click", handleReviewCardClick);
+
+  document
+    .getElementById("dashboard-reviews-board")
+    .addEventListener("click", (e) => {
+      const toggleBtn = e.target.closest(".toggle-context-btn");
+      if (!toggleBtn) return;
+
+      e.preventDefault();
+      const contextPanel = toggleBtn.nextElementSibling;
+      const isHidden = contextPanel.classList.toggle("hidden");
+
+      const textSpan = toggleBtn.querySelector("span");
+      if (textSpan) {
+        textSpan.textContent = isHidden
+          ? "Show Context Provided to AI"
+          : "Hide Context";
+      }
+    });
+
   ensureCommentsModal();
   listenersAttached = true;
 }
@@ -555,4 +595,301 @@ export function initializeDashboard(_state, _viewManager) {
   return {
     loadData,
   };
+}
+
+async function loadReviewsData() {
+  // Get references to all columns and counters
+  const columns = {
+    pending: document.getElementById("pending-reviews-col"),
+    confirmedHuman: document.getElementById("confirmed-human-col"),
+    correctedAI: document.getElementById("corrected-ai-col"),
+  };
+  const counts = {
+    pending: document.getElementById("pending-count"),
+    confirmedHuman: document.getElementById("confirmed-human-count"),
+    correctedAI: document.getElementById("corrected-ai-count"),
+  };
+  const cardTemplate = document.getElementById("review-card-template");
+
+  // Set loading state
+  Object.values(columns).forEach(
+    (col) =>
+      (col.innerHTML = '<div class="loading-spinner mx-auto mt-8"></div>')
+  );
+  Object.values(counts).forEach((count) => (count.textContent = "..."));
+
+  try {
+    const data = await api.getReviewsData();
+    Object.values(columns).forEach((col) => (col.innerHTML = "")); // Clear spinners
+
+    if (data.rows.length === 0) {
+      Object.values(counts).forEach((count) => (count.textContent = "0"));
+      columns.pending.innerHTML =
+        '<p class="text-center text-gray-400 py-4">The review queue is empty!</p>';
+      return;
+    }
+
+    let pendingCount = 0,
+      confirmedHumanCount = 0,
+      correctedAICount = 0;
+
+    data.rows.forEach((item) => {
+      const card = cardTemplate.content.cloneNode(true).firstElementChild;
+
+      // --- FIX 1 START: Populate Reviewer_Reasoning field BEFORE the logic block ---
+      // This ensures the element has content when the show/hide logic runs.
+      card.querySelector('[data-field="Title"]').textContent = item.Title;
+      card.querySelector('[data-field="DOI"]').textContent = item.DOI;
+      card.querySelector(
+        '[data-field="Trigger_Name"]'
+      ).textContent = `Trigger: ${item.Trigger_Name}`; // Changed "Trigger:" to "Disagreement on:"
+      card.querySelector('[data-field="Human_Label"]').textContent =
+        item.Human_Label;
+      card.querySelector(
+        '[data-field="Annotator"]'
+      ).textContent = `(${item.Annotator})`;
+      card.querySelector('[data-field="AI_Label"]').textContent = item.AI_Label;
+      card.querySelector('[data-field="AI_Reasoning"]').textContent =
+        item.AI_Reasoning;
+      card.querySelector(
+        '[data-field="Reviewed_By"]'
+      ).textContent = `(${item.Reviewed_By})`;
+      card.querySelector(
+        '[data-field="Relevant_Context_Provided_to_AI"]'
+      ).textContent = item.Relevant_Context_Provided_to_AI;
+      // This is the critical line that was missing.
+      card.querySelector('[data-field="Reviewer_Reasoning"]').textContent =
+        item.Reviewer_Reasoning || "";
+      // --- FIX 1 END ---
+
+      // Store data on the card element
+      card.dataset.doi = item.DOI;
+      card.dataset.triggerName = item.Trigger_Name;
+      card.dataset.aiLabel = item.AI_Label;
+      card.dataset.dataset = state.currentDataset;
+
+      // --- This logic block is now correct and will work as intended ---
+      const status = item.Review_Status;
+      const reviewerReasoning = item.Reviewer_Reasoning;
+      const aiReasoningSection = card.querySelector(".ai-reasoning-section");
+      const reviewerReasoningSection = card.querySelector(
+        ".reviewer-reasoning-section"
+      );
+      if (
+        (status === "Confirmed Human" || status === "Corrected to AI") &&
+        reviewerReasoning
+      ) {
+        aiReasoningSection.classList.add("hidden");
+        reviewerReasoningSection.classList.remove("hidden");
+        // No need to set textContent here again, it's already done above.
+      }
+
+      const buttonContainer = card.querySelector(".flex-shrink-0");
+      buttonContainer.className =
+        "flex-shrink-0 flex flex-col items-stretch gap-1";
+
+      if (status === "Confirmed Human") {
+        confirmedHumanCount++;
+        buttonContainer.innerHTML = `
+          <button class="btn-primary bg-yellow-600 hover:bg-yellow-700 text-xs py-1 px-2" data-action="undo">Undo</button>
+          <button class="btn-primary bg-red-600 hover:bg-red-700 text-xs py-1 px-2" data-action="reopen">Reopen</button>
+        `;
+        columns.confirmedHuman.appendChild(card);
+      } else if (status === "Corrected to AI") {
+        correctedAICount++;
+        buttonContainer.innerHTML = `
+          <button class="btn-primary bg-red-600 hover:bg-red-700 text-xs py-1 px-2" data-action="undo">Undo</button>
+          <button class="btn-primary bg-yellow-600 hover:bg-yellow-700 text-xs py-1 px-2" data-action="reopen">Reopen</button>
+        `;
+        columns.correctedAI.appendChild(card);
+      } else {
+        // Pending
+        pendingCount++;
+        buttonContainer.innerHTML = `
+          <button class="btn-primary bg-yellow-600 hover:bg-yellow-700 text-xs py-1 px-2" data-action="reopen">Reopen</button>
+          <button class="btn-primary bg-green-600 hover:bg-green-700 text-xs py-1 px-2" data-action="confirm">Confirm Human</button>
+          <button class="btn-primary bg-blue-600 hover:bg-blue-700 text-xs py-1 px-2" data-action="correct">Correct to AI</button>
+        `;
+        columns.pending.appendChild(card);
+      }
+    });
+
+    // Update the counts in the headers
+    counts.pending.textContent = pendingCount;
+    counts.confirmedHuman.textContent = confirmedHumanCount;
+    counts.correctedAI.textContent = correctedAICount;
+  } catch (error) {
+    Object.values(columns).forEach((col) => (col.innerHTML = ""));
+    columns.pending.innerHTML = `<p class="text-center text-red-400 py-4">Error: ${error.message}</p>`;
+  }
+}
+
+async function handleReviewCardClick(e) {
+  const button = e.target.closest("button");
+  if (!button) return;
+
+  const card = button.closest(".review-card");
+  if (!card) return;
+
+  const { doi, triggerName, dataset } = card.dataset;
+  const action = button.dataset.action;
+
+  if (!action) return;
+
+  // Don't disable the button here, let the modal handle the state
+  card.style.opacity = "0.5";
+
+  try {
+    if (action === "reopen") {
+      const paper = await api.reopenAnnotation(doi, dataset);
+      viewManager.showAnnotationViewWithPaper(paper);
+      card.style.opacity = "1"; // Restore on success
+    } else if (action === "confirm" || action === "correct") {
+      // Instead of calling the API, open the modal
+      openReasoningModal(card, action);
+    } else if (action === "undo") {
+      await api.resolveReviewItem(doi, triggerName, "Pending", ""); // Pass empty reasoning
+      showToastNotification("Action undone.", "info");
+      moveCardToColumn(card, "pending-reviews-col");
+    }
+  } catch (error) {
+    showToastNotification(`Action failed: ${error.message}`, "error");
+    card.style.opacity = "1"; // Restore on any error
+  }
+}
+
+function moveCardToColumn(cardElement, targetColumnId) {
+  const targetColumn = document.getElementById(targetColumnId);
+  if (!targetColumn) return;
+
+  const buttonContainer = cardElement.querySelector(".flex-shrink-0");
+  if (buttonContainer) {
+    buttonContainer.innerHTML = "";
+    buttonContainer.className =
+      "flex-shrink-0 flex flex-col items-stretch gap-1";
+  }
+
+  // Add the correct buttons based on the destination column
+  if (targetColumnId === "pending-reviews-col") {
+    // Add the full set of action buttons for pending items
+    buttonContainer.innerHTML = `
+            <button class="btn-primary bg-yellow-600 hover:bg-yellow-700 text-xs py-1 px-2" data-action="reopen">Reopen</button>
+            <button class="btn-primary bg-green-600 hover:bg-green-700 text-xs py-1 px-2" data-action="confirm">Confirm Human</button>
+            <button class="btn-primary bg-blue-600 hover:bg-blue-700 text-xs py-1 px-2" data-action="correct">Correct to AI</button>
+        `;
+
+    // --- START: NEW FIX ---
+    // When moving back to pending, revert the reasoning visibility.
+    const aiReasoningSection = cardElement.querySelector(
+      ".ai-reasoning-section"
+    );
+    const reviewerReasoningSection = cardElement.querySelector(
+      ".reviewer-reasoning-section"
+    );
+
+    aiReasoningSection.classList.remove("hidden");
+    reviewerReasoningSection.classList.add("hidden");
+    // --- END: NEW FIX ---
+  } else {
+    // Add "Undo" and "Reopen" for completed items
+    buttonContainer.innerHTML = `
+            <button class="btn-primary bg-red-600 hover:bg-red-700 text-xs py-1 px-2" data-action="undo">Undo</button>
+            <button class="btn-primary bg-yellow-600 hover:bg-yellow-700 text-xs py-1 px-2" data-action="reopen">Reopen</button>
+        `;
+  }
+
+  cardElement.style.opacity = "1";
+  targetColumn.prepend(cardElement);
+
+  // Update column counts
+  document.getElementById("pending-count").textContent =
+    document.querySelectorAll("#pending-reviews-col .review-card").length;
+  document.getElementById("confirmed-human-count").textContent =
+    document.querySelectorAll("#confirmed-human-col .review-card").length;
+  document.getElementById("corrected-ai-count").textContent =
+    document.querySelectorAll("#corrected-ai-col .review-card").length;
+}
+
+function openReasoningModal(card, action) {
+  const modal = document.getElementById("reasoning-modal");
+  const overlay = document.getElementById("modal-overlay");
+  const title = document.getElementById("reasoning-modal-title");
+  const input = document.getElementById("reasoning-modal-input");
+  const cancelBtn = document.getElementById("reasoning-modal-cancel");
+  const submitBtn = document.getElementById("reasoning-modal-submit");
+
+  setButtonLoading(submitBtn, false, "Submit");
+  title.textContent =
+    action === "confirm" ? "Confirm Human Label" : "Confirm AI Label";
+  input.value = "";
+
+  // --- START FIX: Define closeModal in the outer scope ---
+  const closeModal = () => {
+    modal.classList.add("hidden");
+    overlay.classList.add("hidden");
+    // Restore card opacity in case the user cancels
+    card.style.opacity = "1";
+    // Clean up listeners to prevent them from stacking up on repeated clicks
+    submitBtn.removeEventListener("click", handleSubmit);
+    cancelBtn.removeEventListener("click", closeModal);
+    overlay.removeEventListener("click", closeModal);
+  };
+  // --- END FIX ---
+
+  const handleSubmit = async () => {
+    const reasoning = input.value.trim();
+    if (!reasoning) {
+      showToastNotification(
+        "Please provide a reason for your decision.",
+        "warning"
+      );
+      return;
+    }
+
+    const { doi, triggerName } = card.dataset;
+    const resolution =
+      action === "confirm" ? "Confirmed Human" : "Corrected to AI";
+    const targetColumnId =
+      action === "confirm" ? "confirmed-human-col" : "corrected-ai-col";
+
+    setButtonLoading(submitBtn, true, "Submitting...");
+    try {
+      await api.resolveReviewItem(doi, triggerName, resolution, reasoning);
+      showToastNotification("Review submitted successfully!", "success");
+
+      const aiReasoningSection = card.querySelector(".ai-reasoning-section");
+      const reviewerReasoningSection = card.querySelector(
+        ".reviewer-reasoning-section"
+      );
+      reviewerReasoningSection.querySelector(
+        '[data-field="Reviewer_Reasoning"]'
+      ).textContent = reasoning;
+      const reviewerName = localStorage.getItem("annotatorName") || "unknown";
+      reviewerReasoningSection.querySelector(
+        '[data-field="Reviewed_By"]'
+      ).textContent = `(${reviewerName})`;
+
+      aiReasoningSection.classList.add("hidden");
+      reviewerReasoningSection.classList.remove("hidden");
+
+      moveCardToColumn(card, targetColumnId);
+      closeModal(); // This will now work correctly
+    } catch (error) {
+      showToastNotification(`Submission failed: ${error.message}`, "error");
+      // Also restore card opacity on failure
+      card.style.opacity = "1";
+    } finally {
+      setButtonLoading(submitBtn, false, "Submit");
+    }
+  };
+
+  // Show the modal
+  overlay.classList.remove("hidden");
+  modal.classList.remove("hidden");
+  input.focus();
+
+  // --- FIX: Use addEventListener for cleaner event management ---
+  submitBtn.addEventListener("click", handleSubmit);
+  cancelBtn.addEventListener("click", closeModal);
+  overlay.addEventListener("click", closeModal);
 }

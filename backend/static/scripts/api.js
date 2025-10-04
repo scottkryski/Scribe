@@ -576,3 +576,39 @@ export async function getAppStatus() {
     };
   }
 }
+
+// --- Reviews
+
+export async function getReviewsData() {
+  const response = await fetch(`${API_BASE_URL}/api/reviews`);
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || "Failed to fetch review data.");
+  }
+  return response.json();
+}
+
+export async function resolveReviewItem(
+  doi,
+  trigger_name,
+  resolution,
+  reasoning
+) {
+  const reviewed_by = localStorage.getItem("annotatorName") || "unknown";
+  const response = await fetch(`${API_BASE_URL}/api/reviews/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      doi,
+      trigger_name,
+      reviewed_by,
+      resolution,
+      reasoning,
+    }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || "Failed to resolve review item.");
+  }
+  return response.json();
+}

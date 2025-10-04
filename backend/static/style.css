@@ -42,6 +42,51 @@
     transform: translateY(-4px);
 }
 
+.kanban-column {
+    /* This re-applies the styles from glass-effect and adds the rest */
+    background-color: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border-radius: 1rem; /* rounded-2xl */
+    padding: 0.75rem; /* p-3 */
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.kanban-header {
+    font-size: 1.125rem; /* text-lg */
+    font-weight: 700; /* font-bold */
+    color: white;
+    margin-bottom: 0.75rem; /* mb-3 */
+    padding-left: 0.5rem; /* px-2 */
+    padding-right: 0.5rem; /* px-2 */
+    flex-shrink: 0;
+}
+
+.kanban-content {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 0.25rem; /* p-1 */
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem; /* This replaces space-y-3 */
+}
+
+/* Custom scrollbar styles (these were already correct) */
+.kanban-content::-webkit-scrollbar {
+    width: 8px;
+}
+.kanban-content::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 9999px;
+}
+.kanban-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+
+
+
 /* Theme preview styles */
 .glass-preview { background: linear-gradient(135deg, #4a5568, #1a202c); border: 1px solid rgba(255, 255, 255, 0.2); position: relative; }
 .glass-preview::before { content: ''; position: absolute; top: 10%; left: 10%; width: 80%; height: 80%; background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(5px); border-radius: 0.25rem; border: 1px solid rgba(255, 255, 255, 0.2); }
