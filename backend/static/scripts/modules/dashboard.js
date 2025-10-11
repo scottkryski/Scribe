@@ -18,6 +18,31 @@ let visibleFields = [];
 let commentsModal = null;
 let activeDashboardTab = "annotations"; // 'annotations' or 'synthetic'
 
+const BULK_SETTINGS_KEY = "dashboard.bulk.generator.settings.v1";
+const DEFAULT_BULK_SETTINGS = {
+  requestsPerMinute: 15,
+  maxPapers: 0,
+  targetStatus: "completed",
+};
+const BULK_TARGET_FILTERS = {
+  completed: (row) => row.status === "Completed",
+  completed_incomplete: (row) =>
+    row.status === "Completed" || row.status === "Incomplete",
+  all: () => true,
+};
+const bulkGenerationState = {
+  isRunning: false,
+  cancelRequested: false,
+  queue: [],
+  processed: 0,
+  successes: 0,
+  failures: 0,
+  skipped: 0,
+  lastAugmentStartedAt: 0,
+  statusMessage: "Awaiting start",
+  errors: [],
+};
+
 // --- Helper Functions ---
 
 function statusFormatter(cell) {
@@ -133,29 +158,18 @@ async function handleGenerateClick(e, cell) {
       );
     }
 
-    // 2. Construct the new annotator string
-    const originalAnnotator = paper.existing_annotation.annotator || "Original";
-    let newAnnotator = originalAnnotator;
-    if (currentUser !== originalAnnotator) {
-      newAnnotator = `${originalAnnotator} (orig) + ${currentUser}`;
+    if (!state.activeTemplate) {
+      throw new Error(
+        "No active template is loaded. Open an annotation to load the template before generating."
+      );
     }
 
-    // 3. Build the full payload
-    const payload = {
-      doi: paper.doi,
-      title: paper.title,
-      abstract: paper.abstract,
-      dataset: state.currentDataset,
-      annotator: newAnnotator,
-      model_name:
-        localStorage.getItem("geminiModel") || "gemini-1.5-flash-latest",
-      sample_count: parseInt(
-        localStorage.getItem("augmentSampleCount") || "3",
-        10
-      ),
-      annotations: paper.existing_annotation,
-      template: state.activeTemplate,
-    };
+    // 2. Build the full payload
+    const payload = buildAugmentationPayload(
+      paper,
+      currentUser,
+      state.currentDataset
+    );
 
     showLoading(
       "Augmenting Data...",
@@ -189,6 +203,430 @@ function loadVisibleFields(defaults) {
 }
 function saveVisibleFields(fields) {
   localStorage.setItem(COLS_KEY, JSON.stringify(fields));
+}
+
+function loadBulkSettings() {
+  try {
+    const stored = localStorage.getItem(BULK_SETTINGS_KEY);
+    if (!stored) return { ...DEFAULT_BULK_SETTINGS };
+    const parsed = JSON.parse(stored);
+    const rpm = Number.parseInt(parsed.requestsPerMinute, 10);
+    const maxPapers = Number.parseInt(parsed.maxPapers, 10);
+    const targetStatus =
+      parsed.targetStatus && BULK_TARGET_FILTERS[parsed.targetStatus]
+        ? parsed.targetStatus
+        : DEFAULT_BULK_SETTINGS.targetStatus;
+    return {
+      requestsPerMinute:
+        Number.isFinite(rpm) && rpm > 0
+          ? Math.min(rpm, 60)
+          : DEFAULT_BULK_SETTINGS.requestsPerMinute,
+      maxPapers:
+        Number.isFinite(maxPapers) && maxPapers > 0
+          ? maxPapers
+          : DEFAULT_BULK_SETTINGS.maxPapers,
+      targetStatus,
+    };
+  } catch (error) {
+    console.warn("Could not load bulk generation settings:", error);
+    return { ...DEFAULT_BULK_SETTINGS };
+  }
+}
+
+function saveBulkSettings(settings) {
+  try {
+    localStorage.setItem(BULK_SETTINGS_KEY, JSON.stringify(settings));
+  } catch (error) {
+    console.warn("Could not persist bulk generation settings:", error);
+  }
+}
+
+function applyBulkSettingsToInputs(settings) {
+  const rateInput = document.getElementById("bulk-rate-input");
+  const maxInput = document.getElementById("bulk-max-count");
+  const targetSelect = document.getElementById("bulk-target-select");
+  if (rateInput) rateInput.value = settings.requestsPerMinute;
+  if (maxInput) maxInput.value = settings.maxPapers;
+  if (targetSelect) targetSelect.value = settings.targetStatus;
+}
+
+function readBulkSettingsFromInputs() {
+  const defaults = loadBulkSettings();
+  const rateInput = document.getElementById("bulk-rate-input");
+  const maxInput = document.getElementById("bulk-max-count");
+  const targetSelect = document.getElementById("bulk-target-select");
+
+  let rpm = Number.parseInt(rateInput?.value ?? defaults.requestsPerMinute, 10);
+  if (!Number.isFinite(rpm) || rpm <= 0) rpm = defaults.requestsPerMinute;
+  rpm = Math.min(Math.max(rpm, 1), 60);
+
+  let maxPapers = Number.parseInt(
+    maxInput?.value ?? defaults.maxPapers,
+    10
+  );
+  if (!Number.isFinite(maxPapers) || maxPapers < 0) {
+    maxPapers = defaults.maxPapers;
+  }
+
+  const targetStatus =
+    targetSelect && BULK_TARGET_FILTERS[targetSelect.value]
+      ? targetSelect.value
+      : defaults.targetStatus;
+
+  return {
+    requestsPerMinute: rpm,
+    maxPapers,
+    targetStatus,
+  };
+}
+
+function setBulkStatusMessage(message) {
+  bulkGenerationState.statusMessage = message;
+  updateBulkProgressUi();
+}
+
+function updateBulkProgressUi() {
+  const progressBar = document.getElementById("bulk-progress-bar");
+  const summaryEl = document.getElementById("bulk-progress-summary");
+  const statusEl = document.getElementById("bulk-progress-status");
+  const total = bulkGenerationState.queue.length;
+  const processed = bulkGenerationState.processed;
+  const percent = total ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+
+  if (progressBar) {
+    progressBar.style.width = `${percent}%`;
+  }
+  if (summaryEl) {
+    if (total) {
+      summaryEl.textContent = `${processed} / ${total} processed • ${bulkGenerationState.successes} success • ${bulkGenerationState.failures} failed • ${bulkGenerationState.skipped} skipped`;
+    } else {
+      summaryEl.textContent = "Idle";
+    }
+  }
+  if (statusEl) {
+    statusEl.textContent = bulkGenerationState.statusMessage || "Awaiting start";
+  }
+}
+
+function setBulkRunningUiState(isRunning) {
+  const startBtn = document.getElementById("bulk-start-btn");
+  const cancelBtn = document.getElementById("bulk-cancel-btn");
+  const rateInput = document.getElementById("bulk-rate-input");
+  const maxInput = document.getElementById("bulk-max-count");
+  const targetSelect = document.getElementById("bulk-target-select");
+
+  if (startBtn) {
+    startBtn.disabled = isRunning;
+    if (!isRunning) startBtn.textContent = "Start Run";
+    else startBtn.textContent = "Running...";
+  }
+  if (cancelBtn) {
+    cancelBtn.classList.toggle("hidden", !isRunning);
+    cancelBtn.disabled = !isRunning;
+  }
+  [rateInput, maxInput, targetSelect].forEach((el) => {
+    if (el) el.disabled = isRunning;
+  });
+}
+
+function toggleBulkPanel() {
+  const panel = document.getElementById("bulk-generate-panel");
+  if (!panel || bulkGenerationState.isRunning) return;
+  panel.classList.toggle("hidden");
+}
+
+function ensureBulkPanelVisible() {
+  const panel = document.getElementById("bulk-generate-panel");
+  if (panel) panel.classList.remove("hidden");
+}
+
+function handleBulkSettingChange() {
+  if (bulkGenerationState.isRunning) return;
+  const settings = readBulkSettingsFromInputs();
+  saveBulkSettings(settings);
+}
+
+function getBulkCandidateRows(settings) {
+  if (!table) return [];
+  const data = table.getData();
+  if (!Array.isArray(data)) return [];
+
+  const filterFn =
+    BULK_TARGET_FILTERS[settings.targetStatus] ||
+    BULK_TARGET_FILTERS[DEFAULT_BULK_SETTINGS.targetStatus];
+
+  const seen = new Set();
+  const results = [];
+  for (const row of data) {
+    if (!row || !row.doi) continue;
+    if (seen.has(row.doi)) continue;
+    seen.add(row.doi);
+    if (filterFn(row)) {
+      results.push({
+        doi: row.doi,
+        title: row.title,
+        status: row.status,
+      });
+    }
+  }
+
+  if (settings.maxPapers > 0) {
+    return results.slice(0, settings.maxPapers);
+  }
+  return results;
+}
+
+async function respectRateLimit(minIntervalMs, label) {
+  if (!bulkGenerationState.lastAugmentStartedAt || minIntervalMs <= 0) return;
+  const elapsed = Date.now() - bulkGenerationState.lastAugmentStartedAt;
+  if (elapsed >= minIntervalMs) return;
+  const waitMs = minIntervalMs - elapsed;
+  setBulkStatusMessage(
+    `Waiting ${Math.ceil(waitMs / 1000)}s before ${label} to honor rate limit`
+  );
+  await wait(waitMs);
+}
+
+async function handleBulkStart() {
+  if (bulkGenerationState.isRunning) return;
+
+  ensureBulkPanelVisible();
+
+  if (!state.currentDataset) {
+    showToastNotification(
+      "Load a dataset before starting bulk augmentation.",
+      "error"
+    );
+    return;
+  }
+
+  const annotatorName = localStorage.getItem("annotatorName");
+  if (!annotatorName) {
+    showToastNotification(
+      "Set your annotator name in Settings before running bulk generation.",
+      "error"
+    );
+    return;
+  }
+
+  if (!state.activeTemplate) {
+    showToastNotification(
+      "Bulk generation needs an active template. Open an annotation to load it first.",
+      "error"
+    );
+    return;
+  }
+
+  if (!table) {
+    showToastNotification(
+      "The dashboard table is not ready yet. Try again in a moment.",
+      "error"
+    );
+    return;
+  }
+
+  const settings = readBulkSettingsFromInputs();
+  saveBulkSettings(settings);
+
+  const queue = getBulkCandidateRows(settings);
+  if (!queue.length) {
+    showToastNotification(
+      "No papers matched the current bulk generation settings.",
+      "warning"
+    );
+    return;
+  }
+
+  bulkGenerationState.isRunning = true;
+  bulkGenerationState.cancelRequested = false;
+  bulkGenerationState.queue = queue;
+  bulkGenerationState.processed = 0;
+  bulkGenerationState.successes = 0;
+  bulkGenerationState.failures = 0;
+  bulkGenerationState.skipped = 0;
+  bulkGenerationState.errors = [];
+  bulkGenerationState.lastAugmentStartedAt = 0;
+  setBulkRunningUiState(true);
+  setBulkStatusMessage("Starting bulk generation run…");
+
+  try {
+    await runBulkGeneration(settings, annotatorName);
+  } catch (error) {
+    console.error("Bulk generation run failed:", error);
+    showToastNotification(
+      `Bulk generation failed: ${error.message}`,
+      "error"
+    );
+  } finally {
+    bulkGenerationState.isRunning = false;
+    const wasCanceled = bulkGenerationState.cancelRequested;
+    bulkGenerationState.cancelRequested = false;
+    setBulkRunningUiState(false);
+    if (!wasCanceled && !bulkGenerationState.queue.length) {
+      // Ensure UI resets if run failed before queue assignment.
+      updateBulkProgressUi();
+    }
+  }
+}
+
+function handleBulkCancel() {
+  if (!bulkGenerationState.isRunning) return;
+  bulkGenerationState.cancelRequested = true;
+  setBulkStatusMessage("Cancel requested… finishing current paper");
+}
+
+async function runBulkGeneration(settings, annotatorName) {
+  const total = bulkGenerationState.queue.length;
+  const minIntervalMs = Math.floor(
+    60000 / Math.max(1, settings.requestsPerMinute)
+  );
+
+  updateBulkProgressUi();
+
+  for (let index = 0; index < total; index += 1) {
+    if (bulkGenerationState.cancelRequested) break;
+
+    const candidate = bulkGenerationState.queue[index];
+    const label = `${index + 1}/${total}`;
+
+    if (!candidate.doi) {
+      bulkGenerationState.skipped += 1;
+      bulkGenerationState.processed += 1;
+      setBulkStatusMessage(`Skipping entry without DOI (${label})`);
+      continue;
+    }
+
+    setBulkStatusMessage(
+      `Preparing augmentation for ${candidate.doi} (${label})`
+    );
+    updateBulkProgressUi();
+
+    let paper = null;
+    try {
+      paper = await api.reopenAnnotation(candidate.doi, state.currentDataset);
+    } catch (error) {
+      bulkGenerationState.failures += 1;
+      bulkGenerationState.errors.push({
+        doi: candidate.doi,
+        message: error.message,
+      });
+      bulkGenerationState.processed += 1;
+      setBulkStatusMessage(
+        `Failed to fetch annotation for ${candidate.doi}: ${error.message}`
+      );
+      updateBulkProgressUi();
+      continue;
+    }
+
+    if (!paper || !paper.existing_annotation) {
+      bulkGenerationState.skipped += 1;
+      bulkGenerationState.processed += 1;
+      setBulkStatusMessage(
+        `No completed annotation found for ${candidate.doi}, skipping`
+      );
+      updateBulkProgressUi();
+      continue;
+    }
+
+    await respectRateLimit(
+      minIntervalMs,
+      `processing ${candidate.doi}`
+    );
+
+    setBulkStatusMessage(
+      `Submitting augmentation for ${candidate.doi} (${label})`
+    );
+    updateBulkProgressUi();
+
+    const payload = buildAugmentationPayload(
+      paper,
+      annotatorName,
+      state.currentDataset
+    );
+
+    try {
+      bulkGenerationState.lastAugmentStartedAt = Date.now();
+      const response = await api.augmentData(payload);
+      const message =
+        response.message ||
+        `Generated synthetic data for ${candidate.doi}`;
+      bulkGenerationState.successes += 1;
+      setBulkStatusMessage(message);
+    } catch (error) {
+      bulkGenerationState.failures += 1;
+      bulkGenerationState.errors.push({
+        doi: candidate.doi,
+        message: error.message,
+      });
+      setBulkStatusMessage(
+        `Generation failed for ${candidate.doi}: ${error.message}`
+      );
+    } finally {
+      bulkGenerationState.processed += 1;
+      updateBulkProgressUi();
+    }
+  }
+
+  const canceled = bulkGenerationState.cancelRequested;
+  const summaryPrefix = canceled ? "Bulk generation canceled" : "Bulk generation finished";
+  let summary = `${summaryPrefix}: ${bulkGenerationState.successes} success`;
+  summary += `, ${bulkGenerationState.failures} failed`;
+  summary += `, ${bulkGenerationState.skipped} skipped`;
+
+  const toastType = canceled
+    ? "warning"
+    : bulkGenerationState.failures > 0
+    ? "warning"
+    : "success";
+  setBulkStatusMessage(summary);
+  showToastNotification(summary, toastType, 7000);
+
+  if (bulkGenerationState.errors.length) {
+    console.warn("Bulk augmentation errors:", bulkGenerationState.errors);
+  }
+
+  if (
+    bulkGenerationState.successes > 0 &&
+    activeDashboardTab === "synthetic"
+  ) {
+    await loadSyntheticData();
+  }
+
+  updateBulkProgressUi();
+}
+
+function buildAugmentationPayload(paper, currentUser, datasetName) {
+  const annotatorData = paper.existing_annotation || {};
+  const originalAnnotator = annotatorData.annotator || "Original";
+  const newAnnotator =
+    currentUser === originalAnnotator
+      ? originalAnnotator
+      : `${originalAnnotator} (orig) + ${currentUser}`;
+
+  let sampleCount = Number.parseInt(
+    localStorage.getItem("augmentSampleCount") || "3",
+    10
+  );
+  if (!Number.isFinite(sampleCount) || sampleCount <= 0) {
+    sampleCount = 3;
+  }
+
+  return {
+    doi: paper.doi,
+    title: paper.title,
+    abstract: paper.abstract,
+    dataset: datasetName,
+    annotator: newAnnotator,
+    model_name:
+      localStorage.getItem("geminiModel") || "gemini-1.5-flash-latest",
+    sample_count: sampleCount,
+    annotations: annotatorData,
+    template: state.activeTemplate,
+  };
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // --- START FIX for Column Filter ---
@@ -522,6 +960,19 @@ function setupEventListeners() {
   document
     .getElementById("dashboard-refresh-btn")
     .addEventListener("click", loadData);
+
+  const bulkToggleBtn = document.getElementById("bulk-generate-btn");
+  const bulkStartBtn = document.getElementById("bulk-start-btn");
+  const bulkCancelBtn = document.getElementById("bulk-cancel-btn");
+  if (bulkToggleBtn) bulkToggleBtn.addEventListener("click", toggleBulkPanel);
+  if (bulkStartBtn) bulkStartBtn.addEventListener("click", handleBulkStart);
+  if (bulkCancelBtn) bulkCancelBtn.addEventListener("click", handleBulkCancel);
+  ["bulk-rate-input", "bulk-max-count", "bulk-target-select"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", handleBulkSettingChange);
+  });
+  applyBulkSettingsToInputs(loadBulkSettings());
+  updateBulkProgressUi();
 
   const searchInput = document.getElementById("dashboard-search");
   searchInput.addEventListener("keyup", function () {

@@ -8,6 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 VENV_DIR="$SCRIPT_DIR/backend/venv"
 REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
 
+# Fix for Conda users
+if [[ -n "$CONDA_PREFIX" ]]; then
+  echo "[info] Conda environment detected at $CONDA_PREFIX. Please disable using 'conda deactivate' and use system Python for venv to avoid ensurepip errors."
+fi
+
 # --- Function Definitions ---
 
 # This function smartly installs/updates packages only if requirements.txt has changed.
@@ -34,7 +39,7 @@ install_requirements() {
     # Compare hashes. If they don't match, run pip install quietly.
     if [ "$current_hash" != "$stored_hash" ]; then
         echo "New or updated packages found. Installing..."
-        pip install -q -r "$REQUIREMENTS_FILE"
+        pip install -r "$REQUIREMENTS_FILE"
         echo "$current_hash" > "$hash_file"
         echo "Packages are up to date."
     fi

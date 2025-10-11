@@ -65,6 +65,16 @@ export let refreshDatasetsBtn = null;
 export let dashboardTableContainer = null;
 export let dashboardRefreshBtn = null;
 export let dashboardSearchInput = null;
+export let bulkGenerateBtn = null;
+export let bulkGeneratePanel = null;
+export let bulkRateInput = null;
+export let bulkMaxCountInput = null;
+export let bulkTargetSelect = null;
+export let bulkStartBtn = null;
+export let bulkCancelBtn = null;
+export let bulkProgressBar = null;
+export let bulkProgressSummary = null;
+export let bulkProgressStatus = null;
 
 export function init() {
   // This function is called once the DOM is fully loaded
@@ -143,4 +153,14 @@ export function init() {
   );
   dashboardRefreshBtn = document.getElementById("dashboard-refresh-btn");
   dashboardSearchInput = document.getElementById("dashboard-search");
+  bulkGenerateBtn = document.getElementById("bulk-generate-btn");
+  bulkGeneratePanel = document.getElementById("bulk-generate-panel");
+  bulkRateInput = document.getElementById("bulk-rate-input");
+  bulkMaxCountInput = document.getElementById("bulk-max-count");
+  bulkTargetSelect = document.getElementById("bulk-target-select");
+  bulkStartBtn = document.getElementById("bulk-start-btn");
+  bulkCancelBtn = document.getElementById("bulk-cancel-btn");
+  bulkProgressBar = document.getElementById("bulk-progress-bar");
+  bulkProgressSummary = document.getElementById("bulk-progress-summary");
+  bulkProgressStatus = document.getElementById("bulk-progress-status");
 }
