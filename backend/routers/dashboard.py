@@ -10,6 +10,7 @@ from models import ReopenRequest
 from database import get_papers_index, get_paper_by_doi_from_file
 from config import LOCK_TIMEOUT_SECONDS
 from datetime import datetime
+import re
 
 class SetLockRequest(BaseModel):
     doi: str
@@ -672,8 +673,194 @@ async def get_reviews_data():
         return {"rows": []}
     
     try:
-        all_records = reviews_ws.get_all_records()
-        return {"rows": all_records} # Send everything to the frontend
+        review_records = reviews_ws.get_all_records()
+
+        # Build a lookup of the latest sheet values by DOI for quick comparisons.
+        sheet_records = _get_all_records()
+        sheet_lookup = {}
+        for record in sheet_records:
+            doi_value = _extract_doi(record)
+            normalized_doi = _normalize_doi(doi_value)
+            if normalized_doi and normalized_doi not in sheet_lookup:
+                normalized_map = {}
+                for header, value in record.items():
+                    norm_key = _normalize_header_key(header)
+                    if norm_key and norm_key not in normalized_map:
+                        normalized_map[norm_key] = value
+                entry = {
+                    "raw": record,
+                    "normalized": normalized_map
+                }
+                sheet_lookup[normalized_doi] = entry
+                if doi_value:
+                    sheet_lookup[str(doi_value).strip()] = entry
+                    sheet_lookup[str(doi_value).strip().lower()] = entry
+
+        for record in review_records:
+            doi_value = record.get("DOI") or record.get("doi")
+            normalized_doi = _normalize_doi(doi_value)
+            trigger_name = record.get("Trigger_Name")
+            current_value = None
+            matches_ai = None
+            located_field = None
+            status_reason = "row_not_found"
+
+            if normalized_doi and trigger_name:
+                sheet_entry = (
+                    sheet_lookup.get(normalized_doi)
+                    or sheet_lookup.get(str(doi_value).strip() if doi_value else None)
+                    or sheet_lookup.get(str(doi_value).strip().lower() if doi_value else None)
+                )
+                if sheet_entry is None:
+                    for candidate_record in sheet_records:
+                        candidate_doi = _extract_doi(candidate_record)
+                        if _normalize_doi(candidate_doi) == normalized_doi:
+                            normalized_map = {}
+                            for header, value in candidate_record.items():
+                                norm_key = _normalize_header_key(header)
+                                if norm_key and norm_key not in normalized_map:
+                                    normalized_map[norm_key] = value
+                            sheet_entry = {
+                                "raw": candidate_record,
+                                "normalized": normalized_map,
+                            }
+                            sheet_lookup[normalized_doi] = sheet_entry
+                            break
+                if sheet_entry is not None:
+                    raw_row = sheet_entry["raw"]
+                    normalized_row = sheet_entry["normalized"]
+                    status_reason = "column_not_found"
+                    candidate_headers = []
+                    for key in (
+                        "Label_Field",
+                        "Label_Column",
+                        "Field_Name",
+                        "Field_Id",
+                        "Field_ID",
+                        "Target_Field",
+                        "Target_Column",
+                    ):
+                        value = record.get(key)
+                        if value:
+                            candidate_headers.append(value)
+
+                    for dynamic_key, dynamic_value in record.items():
+                        if (
+                            isinstance(dynamic_key, str)
+                            and dynamic_value
+                            and dynamic_key.endswith(("_Field", "_Column"))
+                            and dynamic_value not in candidate_headers
+                        ):
+                            candidate_headers.append(dynamic_value)
+
+                    candidate_headers.extend(
+                        [
+                            "Human_Label",
+                            "human_label",
+                            "Human Label",
+                            trigger_name,
+                        ]
+                    )
+
+                    if trigger_name:
+                        trigger_base = str(trigger_name).strip()
+                        trigger_lower = trigger_base.lower()
+                        trigger_no_space = trigger_lower.replace(" ", "_")
+                        trigger_no_dash = trigger_no_space.replace("-", "_")
+                        trigger_variants = {
+                            trigger_base,
+                            trigger_lower,
+                            trigger_no_space,
+                            trigger_no_dash,
+                            f"trigger_{trigger_base}",
+                            f"trigger_{trigger_lower}",
+                            f"trigger_{trigger_no_space}",
+                            f"trigger_{trigger_no_dash}",
+                            f"Trigger_{trigger_base}",
+                            f"Trigger_{trigger_lower}",
+                            f"Trigger_{trigger_no_space}",
+                            f"Trigger_{trigger_no_dash}",
+                        }
+                        candidate_headers.extend([v for v in trigger_variants if v])
+
+                    candidate_headers.extend(
+                        _candidate_columns_from_trigger(trigger_name)
+                    )
+
+                    seen_candidates = set()
+                    deduped_candidates = []
+                    for cand in candidate_headers:
+                        if cand and cand not in seen_candidates:
+                            deduped_candidates.append(cand)
+                            seen_candidates.add(cand)
+                    candidate_headers = deduped_candidates
+
+                    for candidate in candidate_headers:
+                        if not candidate:
+                            continue
+                        candidate_str = str(candidate).strip()
+                        if not candidate_str:
+                            continue
+                        if candidate_str in raw_row:
+                            current_value = raw_row.get(candidate_str)
+                            located_field = candidate_str
+                        else:
+                            norm_key = _normalize_header_key(candidate_str)
+                            if norm_key and norm_key in normalized_row:
+                                current_value = normalized_row[norm_key]
+                                located_field = _first_header_with_norm(raw_row, norm_key) or candidate_str
+                        if current_value is not None:
+                            break
+
+                    if current_value is None:
+                        norm_trigger = _normalize_header_key(trigger_name)
+                        if norm_trigger and norm_trigger in normalized_row:
+                            current_value = normalized_row[norm_trigger]
+                            located_field = next(
+                                (hdr for hdr in raw_row.keys() if _normalize_header_key(hdr) == norm_trigger),
+                                trigger_name,
+                            )
+                    if current_value is None and trigger_name:
+                        norm_trigger = _normalize_header_key(trigger_name)
+                        if norm_trigger:
+                            for header, value in raw_row.items():
+                                if _normalize_header_key(header) == norm_trigger:
+                                    current_value = value
+                                    located_field = header
+                                    break
+                    if current_value is None and trigger_name:
+                        norm_trigger = _normalize_header_key(trigger_name)
+                        if norm_trigger:
+                            for header, value in raw_row.items():
+                                header_norm = _normalize_header_key(header)
+                                if header_norm and norm_trigger in header_norm:
+                                    current_value = value
+                                    located_field = header
+                                    break
+
+                    if current_value is not None:
+                        ai_label = record.get("AI_Label")
+                        current_value_stripped = str(current_value).strip()
+                        if ai_label is None:
+                            matches_ai = None
+                        else:
+                            ai_label_stripped = str(ai_label).strip()
+                            matches_ai = current_value_stripped.lower() == ai_label_stripped.lower()
+                        status_reason = "ok"
+                    else:
+                        matches_ai = None
+                        if located_field:
+                            status_reason = "column_blank"
+                        else:
+                            status_reason = "column_not_found"
+                            located_field = trigger_name or located_field
+
+            record["Current_Label"] = current_value
+            record["Current_Label_Field"] = located_field
+            record["Label_Matches_AI"] = matches_ai
+            record["Label_Check_Status"] = status_reason
+
+        return {"rows": review_records}  # Send everything to the frontend
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve reviews: {e}")
 
@@ -723,3 +910,90 @@ async def resolve_review_item(request: ResolveReviewRequest):
         raise HTTPException(status_code=500, detail=f"Sheet format error. Did you add the 'Reviewer_Reasoning' column? Error: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update review status: {e}")
+
+
+def _normalize_header_key(key: Optional[str]) -> str:
+    if key is None:
+        return ""
+    return re.sub(r"[^a-z0-9]+", "", str(key).lower())
+
+
+def _first_header_with_norm(row: dict, normalized_key: str) -> Optional[str]:
+    for header in row.keys():
+        if _normalize_header_key(header) == normalized_key:
+            return header
+    return None
+
+
+def _candidate_columns_from_trigger(trigger_name: Optional[str]) -> list[str]:
+    if not trigger_name:
+        return []
+
+    base = trigger_name.strip()
+    if not base:
+        return []
+
+    candidates = []
+    lower = base.lower()
+
+    keyword_map = [
+        ("human", "trigger_humans"),
+        ("animal", "trigger_animals"),
+        ("experimental", "trigger_experimental"),
+        ("experiment", "trigger_experimental"),
+        ("intervention", "trigger_experimental"),
+        ("personal", "trigger_PersonalSensitiveData"),
+        ("sensitive", "trigger_PersonalSensitiveData"),
+        ("data", "trigger_PersonalSensitiveData"),
+    ]
+    for keyword, column in keyword_map:
+        if keyword in lower:
+            candidates.append(column)
+
+    tokens = re.findall(r"[a-z0-9]+", lower)
+    if tokens:
+        underscore = "_".join(tokens)
+        camel = "".join(token.capitalize() for token in tokens)
+        candidates.append(f"trigger_{underscore}")
+        candidates.append(f"trigger_{camel}")
+
+    candidates.append(f"trigger_{lower}")
+
+    # Remove duplicates while preserving order
+    seen = set()
+    ordered = []
+    for cand in candidates:
+        if cand and cand not in seen:
+            ordered.append(cand)
+            seen.add(cand)
+    return ordered
+
+
+def _normalize_doi(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return None
+    prefixes = [
+        "https://doi.org/",
+        "http://doi.org/",
+        "doi:",
+        "doi.org/",
+    ]
+    for prefix in prefixes:
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+    normalized = normalized.strip()
+    return normalized or None
+
+
+def _extract_doi(record: dict) -> Optional[str]:
+    if not record:
+        return None
+    for key, value in record.items():
+        norm_key = _normalize_header_key(key)
+        if norm_key.endswith("doi") or "doi" in norm_key:
+            if value:
+                return str(value).strip()
+    return None

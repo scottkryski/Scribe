@@ -1,5 +1,8 @@
 # backend/routers/pdf.py
+import asyncio
 import re
+from pathlib import Path
+
 import requests
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
@@ -12,8 +15,11 @@ router = APIRouter()
 
 @router.post("/download-pdf")
 async def download_pdf_proxy(request: PdfRequest):
-    import io
-    from urllib.parse import urljoin, urlparse, parse_qs
+    return await asyncio.to_thread(_download_pdf_sync, request)
+
+
+def _download_pdf_sync(request: PdfRequest):
+    from urllib.parse import urljoin, urlparse
 
     print(f"LOG: Received request to download PDF from URL: {request.url}")
 
@@ -221,12 +227,18 @@ async def download_pdf_proxy(request: PdfRequest):
 
 @router.post("/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...), expected_filename: str = Form(...)):
-    if not expected_filename.endswith(".pdf"):
+    safe_name = Path(expected_filename).name
+    if safe_name != expected_filename or any(sep in expected_filename for sep in ("/", "\\")):
+        raise HTTPException(status_code=400, detail="Invalid expected filename. Path separators are not allowed.")
+    if not safe_name.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Invalid expected filename. Must end with .pdf.")
-    file_path = PDF_DIR / expected_filename
+    if safe_name.startswith(".") or not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid expected filename.")
+
+    file_path = PDF_DIR / safe_name
     try:
         with open(file_path, "wb") as f:
             f.write(await file.read())
-        return {"status": "success", "filename": expected_filename, "url": f"/pdfs/{expected_filename}"}
+        return {"status": "success", "filename": safe_name, "url": f"/pdfs/{safe_name}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error saving uploaded PDF file: {e}")

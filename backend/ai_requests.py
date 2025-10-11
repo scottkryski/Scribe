@@ -6,13 +6,32 @@ from dotenv import load_dotenv, find_dotenv
 import os
 import asyncio
 from pydantic import BaseModel, ValidationError, create_model
-from typing import Optional, Literal, Dict, Any, Type
+from typing import Optional, Literal, Dict, Any, Type, Set
 from pathlib import Path
 import enum
+import re
 
 # This global variable will hold the key for our own internal checks.
 GEMINI_API_KEY = None
 _genai_configured = False
+
+def _normalize_enum_member_name(option: str, existing_names: Set[str]) -> str:
+    """
+    Produces a valid, unique Enum member name for the given option text.
+    """
+    normalized = re.sub(r"\W+", "_", (option or "").strip()).strip("_")
+    if not normalized:
+        normalized = "OPTION"
+    normalized = normalized.upper()
+
+    candidate = normalized
+    suffix = 1
+    while candidate in existing_names:
+        candidate = f"{normalized}_{suffix}"
+        suffix += 1
+
+    existing_names.add(candidate)
+    return candidate
 
 def configure_genai():
     """
@@ -96,7 +115,12 @@ def _create_dynamic_response_model(template: Dict[str, Any]) -> Type[BaseModel]:
             if not options: continue
             # Create an Enum for the select options
             enum_name = f"{field_id.capitalize()}Enum"
-            field_enum = enum.Enum(enum_name, {opt.replace('-', ''): opt for opt in options})
+            enum_members = {}
+            used_member_names: Set[str] = set()
+            for opt in options:
+                member_name = _normalize_enum_member_name(opt, used_member_names)
+                enum_members[member_name] = opt
+            field_enum = enum.Enum(enum_name, enum_members)
             fields_for_model[field_id] = (field_enum, ...)
         else: # boolean
             fields_for_model[field_id] = (bool, ...)

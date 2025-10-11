@@ -1119,6 +1119,13 @@ async function loadReviewsData() {
       card.dataset.aiLabel = item.AI_Label;
       card.dataset.dataset = state.currentDataset;
 
+      const sheetStatusEl = card.querySelector(".sheet-sync-status");
+      if (sheetStatusEl) {
+        sheetStatusEl.className =
+          "sheet-sync-status hidden text-xs font-semibold px-3 py-2 rounded-lg mb-3";
+        sheetStatusEl.textContent = "";
+      }
+
       // --- This logic block is now correct and will work as intended ---
       const status = item.Review_Status;
       const reviewerReasoning = item.Reviewer_Reasoning;
@@ -1152,6 +1159,65 @@ async function loadReviewsData() {
           <button class="btn-primary bg-red-600 hover:bg-red-700 text-xs py-1 px-2" data-action="undo">Undo</button>
           <button class="btn-primary bg-yellow-600 hover:bg-yellow-700 text-xs py-1 px-2" data-action="reopen">Reopen</button>
         `;
+
+        if (sheetStatusEl) {
+          const aiLabel = item.AI_Label ?? "";
+          const rawCurrent = item.Current_Label;
+          const currentLabel =
+            rawCurrent === null || rawCurrent === undefined
+              ? ""
+              : String(rawCurrent).trim();
+          const matchesAi = item.Label_Matches_AI;
+          const checkStatus = item.Label_Check_Status || "";
+          const labelFieldRaw =
+            item.Current_Label_Field && item.Current_Label_Field !== "None"
+              ? String(item.Current_Label_Field).trim()
+              : "";
+          const labelFieldName = labelFieldRaw
+            ? `Column "${labelFieldRaw}"`
+            : "Main sheet";
+
+          if (matchesAi === true) {
+            const displayLabel = currentLabel || aiLabel || "(blank)";
+            sheetStatusEl.textContent = `${labelFieldName} now matches the AI label ("${displayLabel}").`;
+            sheetStatusEl.classList.remove("hidden");
+            sheetStatusEl.classList.add(
+              "bg-emerald-500/20",
+              "text-emerald-300",
+              "border",
+              "border-emerald-500/40"
+            );
+          } else if (matchesAi === false) {
+            const displayLabel = currentLabel || "(blank)";
+            sheetStatusEl.textContent = `${labelFieldName} still shows "${displayLabel}".`;
+            sheetStatusEl.classList.remove("hidden");
+            sheetStatusEl.classList.add(
+              "bg-red-500/20",
+              "text-red-300",
+              "border",
+              "border-red-500/40"
+            );
+          } else {
+            let message = "Could not confirm the current label value in the main sheet.";
+            if (checkStatus === "row_not_found") {
+              message = "Could not find this DOI in the main sheet.";
+            } else if (checkStatus === "column_not_found") {
+              const triggerName = item.Trigger_Name || "the trigger column";
+              message = `Could not locate "${triggerName}" in the main sheet row.`;
+            } else if (checkStatus === "column_blank") {
+              message = `${labelFieldName} exists but is blank in the main sheet.`;
+            }
+            sheetStatusEl.textContent = message;
+            sheetStatusEl.classList.remove("hidden");
+            sheetStatusEl.classList.add(
+              "bg-gray-600/40",
+              "text-gray-200",
+              "border",
+              "border-gray-500/40"
+            );
+          }
+        }
+
         columns.correctedAI.appendChild(card);
       } else {
         // Pending
