@@ -844,7 +844,10 @@ export function renderDetailedStats(stats, summary) {
               <div class="glass-effect p-4 rounded-xl">
                   <div class="flex justify-between items-center mb-2">
                       <span class="font-semibold text-gray-200 truncate pr-2">${key}</span>
-                      <span class="font-bold text-white">${trueCount}</span>
+                      <div class="text-right leading-tight">
+                          <span class="block text-white font-bold">${trueCount} TRUE</span>
+                          <span class="block text-sm text-gray-400">${falseCount} FALSE</span>
+                      </div>
                   </div>
                   <div class="w-full bg-black bg-opacity-20 rounded-full h-2.5">
                       <div class="bg-purple-500 h-2.5 rounded-full" style="width: ${percentage}%"></div>
