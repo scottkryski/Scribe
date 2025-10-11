@@ -236,5 +236,72 @@ export function initializeViewManager(_state, _actions, _dashboardModule) {
     },
   };
 
+  document.addEventListener("stats:reopen", async (event) => {
+    const detail = event.detail || {};
+    const doi = detail.doi;
+    const datasetFromEvent = detail.dataset;
+    const button = detail.button;
+
+    if (!doi) {
+      ui.showToastNotification("Missing DOI for this annotation.", "error");
+      return;
+    }
+
+    const targetDataset = datasetFromEvent || state.currentDataset;
+    if (!targetDataset) {
+      ui.showToastNotification(
+        "Cannot reopen: no dataset specified for this record.",
+        "error"
+      );
+      return;
+    }
+
+    const annotatorName = localStorage.getItem("annotatorName");
+    if (!annotatorName) {
+      ui.showToastNotification(
+        "Set your annotator name in Settings before reopening.",
+        "warning"
+      );
+      return;
+    }
+
+    const disableButton = () => {
+      if (!button) return;
+      button.disabled = true;
+      button.classList.add("opacity-50", "cursor-not-allowed");
+    };
+    const restoreButton = () => {
+      if (!button) return;
+      button.disabled = false;
+      button.classList.remove("opacity-50", "cursor-not-allowed");
+    };
+
+    disableButton();
+
+    try {
+      await api.setLock(doi, annotatorName, targetDataset);
+    } catch (error) {
+      ui.showToastNotification(
+        `Could not lock ${doi}: ${error.message}`,
+        "error"
+      );
+      restoreButton();
+      return;
+    }
+
+    try {
+      const paper = await api.reopenAnnotation(doi, targetDataset);
+      await viewManager.showAnnotationViewWithPaper(paper);
+      ui.showToastNotification(`Reopened ${doi} for annotation.`, "success");
+    } catch (error) {
+      ui.showToastNotification(
+        `Error reopening ${doi}: ${error.message}`,
+        "error"
+      );
+    } finally {
+      restoreButton();
+    }
+  });
+
   return viewManager;
 }

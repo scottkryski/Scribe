@@ -4,6 +4,21 @@ import * as api from "./api.js";
 
 let autoFillNotifyTimer = null;
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).replace(
+    /[&<>"']/g,
+    (match) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[match] || match)
+  );
+}
+
 export function showDebouncedAutoFillNotification() {
   if (autoFillNotifyTimer) {
     clearTimeout(autoFillNotifyTimer);
@@ -623,15 +638,188 @@ export function renderDetailedStats(stats, summary) {
     doc_type_distribution,
     leaderboard,
     dataset_stats,
+    remaining_articles,
   } = stats;
   const { completed_count, incomplete_count } = summary;
 
   document.getElementById("stats-total-annotations").textContent =
     total_annotations;
+  const remainingCount =
+    summary.remaining_count ?? remaining_articles ?? 0;
+  document.getElementById("stats-remaining-annotations").textContent =
+    remainingCount;
   document.getElementById("stats-completed-annotations").textContent =
     completed_count;
   document.getElementById("stats-incomplete-annotations").textContent =
     incomplete_count;
+
+  const incompleteDetails = Array.isArray(stats.incomplete_details)
+    ? stats.incomplete_details
+    : [];
+  const incompleteCard = document.getElementById("stats-incomplete-card");
+  const incompleteHint = document.getElementById("stats-incomplete-hint");
+  const detailSection = document.getElementById("stats-incomplete-details");
+  const detailList = document.getElementById("stats-incomplete-list");
+  const detailEmpty = document.getElementById("stats-incomplete-empty");
+  const closeBtn = document.getElementById("stats-incomplete-close");
+
+  const wasDetailsOpen =
+    detailSection && !detailSection.classList.contains("hidden");
+  const hasIncompleteItems = incompleteDetails.length > 0;
+
+  if (incompleteCard) {
+    incompleteCard.classList.toggle("cursor-pointer", hasIncompleteItems);
+    incompleteCard.classList.toggle("cursor-default", !hasIncompleteItems);
+    incompleteCard.classList.toggle("opacity-50", !hasIncompleteItems);
+    incompleteCard.setAttribute(
+      "aria-disabled",
+      hasIncompleteItems ? "false" : "true"
+    );
+    incompleteCard.tabIndex = hasIncompleteItems ? 0 : -1;
+    if (!hasIncompleteItems) {
+      incompleteCard.setAttribute("aria-expanded", "false");
+    }
+  }
+
+  if (incompleteHint) {
+    incompleteHint.classList.toggle("hidden", !hasIncompleteItems);
+  }
+
+  if (detailSection) {
+    if (!hasIncompleteItems) {
+      detailSection.classList.add("hidden");
+    } else if (wasDetailsOpen) {
+      detailSection.classList.remove("hidden");
+    } else {
+      detailSection.classList.add("hidden");
+    }
+    const expanded =
+      hasIncompleteItems && !detailSection.classList.contains("hidden");
+    if (incompleteCard) {
+      incompleteCard.setAttribute("aria-expanded", expanded.toString());
+    }
+  }
+
+  if (detailEmpty) {
+    detailEmpty.classList.toggle("hidden", hasIncompleteItems);
+  }
+
+  if (detailList) {
+    if (hasIncompleteItems) {
+      detailList.innerHTML = incompleteDetails
+        .map((item) => {
+          const missingFields = Array.isArray(item.missing_fields)
+            ? item.missing_fields
+            : [];
+          const missingBadges = missingFields
+            .map(
+              (field) => `
+                <span class="inline-flex items-center px-2 py-1 rounded-full bg-red-500/20 text-red-200 text-xs font-medium">
+                  ${escapeHtml(field)}
+                </span>`
+            )
+            .join("");
+          const title = item.title || item.doi || "Untitled annotation";
+          const annotator = item.annotator || "Unassigned";
+          const datasetRaw = item.dataset || "";
+          const datasetLabel = datasetRaw || "Dataset unknown";
+          const doiRaw = item.doi || "";
+          const doiLabel = doiRaw || "No DOI";
+          const encodedDataset = encodeURIComponent(datasetRaw);
+          const encodedDoi = encodeURIComponent(doiRaw);
+          const missingCount = missingFields.length;
+          const missingCountLabel =
+            missingCount === 1 ? "1 field" : `${missingCount} fields`;
+          return `
+              <div class="bg-black/20 border border-white/5 rounded-xl p-4">
+                  <div class="flex flex-wrap justify-between gap-3">
+                      <div>
+                          <p class="text-white font-semibold">${escapeHtml(
+                            title
+                          )}</p>
+                          <p class="text-sm text-gray-400">${escapeHtml(
+                            doiLabel
+                          )} · ${escapeHtml(annotator)}</p>
+                      </div>
+                      <div class="text-sm text-gray-400 text-right">
+                          ${escapeHtml(datasetLabel)}
+                      </div>
+                  </div>
+                  <div class="mt-3 space-y-3">
+                      <div>
+                          <p class="text-sm text-gray-300">Missing fields (${missingCountLabel})</p>
+                          <div class="flex flex-wrap gap-2">
+                              ${
+                                missingBadges ||
+                                '<span class="text-gray-400 text-sm">No missing fields detected.</span>'
+                              }
+                          </div>
+                      </div>
+                      <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-white/5">
+                          <span class="text-xs text-gray-400">Reopen to continue this annotation.</span>
+                          <button type="button" class="btn-primary stats-reopen-btn text-xs py-2 px-3 bg-blue-600 hover:bg-blue-700" data-doi="${encodedDoi}" data-dataset="${encodedDataset}">
+                              Reopen
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          `;
+        })
+        .join("");
+
+      detailList
+        .querySelectorAll(".stats-reopen-btn")
+        .forEach((button) => {
+          button.addEventListener("click", () => {
+            const datasetValue = decodeURIComponent(
+              button.dataset.dataset || ""
+            );
+            const doiValue = decodeURIComponent(button.dataset.doi || "");
+            document.dispatchEvent(
+              new CustomEvent("stats:reopen", {
+                detail: { doi: doiValue, dataset: datasetValue, button },
+              })
+            );
+          });
+        });
+    } else {
+      detailList.innerHTML = "";
+    }
+  }
+
+  if (incompleteCard && !incompleteCard.dataset.boundIncompleteToggle) {
+    const toggleDetails = () => {
+      if (incompleteCard.getAttribute("aria-disabled") === "true") return;
+      if (!detailSection) return;
+      const willShow = detailSection.classList.contains("hidden");
+      detailSection.classList.toggle("hidden");
+      const expanded = !detailSection.classList.contains("hidden");
+      incompleteCard.setAttribute("aria-expanded", expanded.toString());
+      if (willShow) {
+        detailSection.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    };
+    incompleteCard.addEventListener("click", toggleDetails);
+    incompleteCard.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleDetails();
+      }
+    });
+    incompleteCard.dataset.boundIncompleteToggle = "true";
+  }
+
+  if (closeBtn && !closeBtn.dataset.boundClose) {
+    closeBtn.addEventListener("click", () => {
+      if (!detailSection) return;
+      detailSection.classList.add("hidden");
+      if (incompleteCard) {
+        incompleteCard.setAttribute("aria-expanded", "false");
+        incompleteCard.focus();
+      }
+    });
+    closeBtn.dataset.boundClose = "true";
+  }
 
   const breakdownContainer = document.getElementById("stats-overall-breakdown");
   breakdownContainer.innerHTML = "";

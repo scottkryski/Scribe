@@ -470,7 +470,11 @@
                 </div>
                 <div id="stats-content" class="hidden space-y-8">
                     <!-- Top-level Summary -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        <div class="glass-effect p-6 rounded-2xl">
+                            <h3 class="text-lg font-semibold text-gray-300">Remaining Articles</h3>
+                            <p id="stats-remaining-annotations" class="text-4xl font-bold">0</p>
+                        </div>
                         <div class="glass-effect p-6 rounded-2xl">
                             <h3 class="text-lg font-semibold text-gray-300">Total Annotations</h3>
                             <p id="stats-total-annotations" class="text-4xl font-bold">0</p>
@@ -479,10 +483,19 @@
                             <h3 class="text-lg font-semibold text-gray-300">Completed Annotations</h3>
                             <p id="stats-completed-annotations" class="text-4xl font-bold">0</p>
                         </div>
-                        <div class="glass-effect p-6 rounded-2xl">
+                        <div class="glass-effect p-6 rounded-2xl transition cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-400 focus-visible:ring-offset-black/40" id="stats-incomplete-card" role="button" tabindex="0" aria-expanded="false" aria-controls="stats-incomplete-details" aria-disabled="true">
                             <h3 class="text-lg font-semibold text-gray-300">Incomplete Annotations</h3>
                             <p id="stats-incomplete-annotations" class="text-4xl font-bold">0</p>
+                            <p id="stats-incomplete-hint" class="text-sm text-blue-300 mt-2 hidden">Click to review incomplete annotations</p>
                         </div>
+                    </div>
+                    <div id="stats-incomplete-details" class="glass-effect p-6 rounded-2xl hidden">
+                        <div class="flex items-center justify-between gap-4 mb-4">
+                            <h2 class="text-xl font-semibold text-white">Incomplete Annotations</h2>
+                            <button id="stats-incomplete-close" type="button" class="px-3 py-1 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-400 focus-visible:ring-offset-black/40 transition">Close</button>
+                        </div>
+                        <p id="stats-incomplete-empty" class="text-sm text-gray-400">All annotations are currently complete.</p>
+                        <div id="stats-incomplete-list" class="space-y-4"></div>
                     </div>
                     <!-- Overall Annotation Breakdown -->
                     <div class="glass-effect p-8 rounded-3xl">

@@ -87,6 +87,208 @@ def _get_all_records():
         print(f"ERROR: Could not fetch records from Google Sheet: {e}")
         return []
 
+_KNOWN_METADATA_FIELDS = {
+    "annotator",
+    "doi",
+    "title",
+    "abstract",
+    "dataset",
+    "lock_annotator",
+    "lock_timestamp",
+    "latest_comment",
+    "status",
+    "timestamp",
+    "annotation_timestamp",
+    "notes",
+    "comment",
+    "comments",
+    "review_status",
+    "reviewed_by",
+    "reviewer_reasoning",
+    "ai_summary",
+    "ai_context",
+    "ai_reasoning",
+    "ai_model",
+    "ai_timestamp",
+    "ai_source",
+    "pdf_url",
+    "pdf_filename",
+    "row_id",
+    "id",
+}
+_METADATA_PREFIXES = ("lock_", "latest_", "ai_", "review_", "comment_", "system_", "bulk_", "generator_", "internal_", "metadata_", "sheet_", "pdf_")
+_METADATA_SUFFIXES = ("_context", "_reasoning", "_timestamp", "_notes", "_note", "_comment", "_comments", "_history", "_url")
+
+
+def _has_meaningful_value(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() != ""
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value) > 0
+    return True
+
+
+def _record_has_submission(record: dict) -> bool:
+    annotator_value = record.get("annotator")
+    if _has_meaningful_value(annotator_value):
+        return True
+    annotator_value = record.get("Annotator")
+    return _has_meaningful_value(annotator_value)
+
+
+def _get_template_annotation_fields(headers):
+    if not state.worksheet:
+        return []
+    try:
+        spreadsheet_id = state.worksheet.spreadsheet.id
+    except Exception:
+        return []
+
+    template = state.SHEET_TEMPLATES.get(spreadsheet_id)
+    if not template:
+        return []
+
+    header_set = set(headers)
+    fields = []
+    for field in template.get("fields", []):
+        field_id = field.get("id")
+        if not field_id:
+            continue
+        if field_id in header_set:
+            fields.append(field_id)
+    return fields
+
+
+def _infer_annotation_fields(headers):
+    inferred = []
+    for header in headers:
+        if not header:
+            continue
+        normalized = header.strip().lower()
+        if not normalized:
+            continue
+        if normalized in _KNOWN_METADATA_FIELDS:
+            continue
+        if any(normalized.startswith(prefix) for prefix in _METADATA_PREFIXES):
+            continue
+        if any(normalized.endswith(suffix) for suffix in _METADATA_SUFFIXES):
+            continue
+        inferred.append(header)
+    return inferred
+
+
+def _resolve_annotation_fields(headers):
+    if not headers:
+        return []
+    from_template = _get_template_annotation_fields(headers)
+    if from_template:
+        return from_template
+    return _infer_annotation_fields(headers)
+
+
+def _calculate_annotation_completeness(records):
+    if not records:
+        return {
+            "total": 0,
+            "completed": 0,
+            "incomplete": 0,
+            "fields": [],
+            "annotated_records": [],
+            "incomplete_details": [],
+            "dataset_annotation_counts": Counter(),
+        }
+
+    headers = list(records[0].keys())
+    annotation_fields = _resolve_annotation_fields(headers)
+
+    total = 0
+    completed = 0
+    incomplete = 0
+    annotated_records = []
+    incomplete_details = []
+    dataset_annotation_counts = Counter()
+
+    for record in records:
+        if not _record_has_submission(record):
+            continue
+        annotated_records.append(record)
+        total += 1
+
+        dataset_value = (
+            record.get("dataset")
+            or record.get("Dataset")
+            or getattr(state, "currentDataset", "")
+        )
+        if dataset_value:
+            dataset_annotation_counts[dataset_value] += 1
+
+        if not annotation_fields:
+            completed += 1
+            continue
+
+        missing_fields = []
+        for field in annotation_fields:
+            value = record.get(field)
+            if _has_meaningful_value(value):
+                continue
+            missing_fields.append(field)
+
+        if not missing_fields:
+            completed += 1
+        else:
+            incomplete += 1
+            incomplete_details.append({
+                "doi": record.get("doi") or record.get("DOI") or "",
+                "title": record.get("title") or record.get("Title") or "",
+                "annotator": record.get("annotator") or record.get("Annotator") or "",
+                "dataset": dataset_value,
+                "missing_fields": missing_fields,
+            })
+
+    return {
+        "total": total,
+        "completed": completed,
+        "incomplete": incomplete,
+        "fields": annotation_fields,
+        "annotated_records": annotated_records,
+        "incomplete_details": incomplete_details,
+        "dataset_annotation_counts": dataset_annotation_counts,
+    }
+
+
+def _calculate_remaining_articles(dataset_annotation_counts: Counter):
+    datasets_to_check = set(dataset_annotation_counts.keys())
+    active_dataset = getattr(state, "currentDataset", None)
+    if active_dataset:
+        datasets_to_check.add(active_dataset)
+
+    total_remaining = 0
+    remaining_by_dataset = {}
+    totals_by_dataset = {}
+
+    for dataset_name in datasets_to_check:
+        if not dataset_name:
+            continue
+        try:
+            total_papers = len(get_papers_index(dataset_name))
+        except Exception as e:
+            print(f"WARN: Could not determine total papers for dataset '{dataset_name}': {e}")
+            total_papers = 0
+
+        annotated_count = dataset_annotation_counts.get(dataset_name, 0)
+        remaining = max(total_papers - annotated_count, 0)
+        totals_by_dataset[dataset_name] = total_papers
+        remaining_by_dataset[dataset_name] = remaining
+        total_remaining += remaining
+
+    return {
+        "total_remaining": total_remaining,
+        "remaining_by_dataset": remaining_by_dataset,
+        "totals_by_dataset": totals_by_dataset,
+    }
+
 @router.get("/api/synthetic-sheet-data")
 async def get_synthetic_sheet_data():
     """Fetches all data from the 'SyntheticData' worksheet."""
@@ -358,33 +560,45 @@ async def reopen_annotation(request: ReopenRequest):
 async def get_sheet_stats():
     """Provides simple counts of completed vs incomplete annotations."""
     records = _get_all_records()
-    if not records:
-        return {"completed_count": 0, "incomplete_count": 0}
-
-    status_counts = Counter(r.get("status") for r in records)
+    stats = _calculate_annotation_completeness(records)
+    remaining_info = _calculate_remaining_articles(stats["dataset_annotation_counts"])
     return {
-        "completed_count": status_counts.get("Completed", 0),
-        "incomplete_count": status_counts.get("Incomplete", 0)
+        "total_count": stats["total"],
+        "completed_count": stats["completed"],
+        "incomplete_count": stats["incomplete"],
+        "remaining_count": remaining_info["total_remaining"],
     }
 
 @router.get("/get-detailed-stats")
 async def get_detailed_stats():
     records = _get_all_records()
-    if not records:
-        raise HTTPException(status_code=404, detail="No data found in the sheet to generate stats.")
+    completeness = _calculate_annotation_completeness(records)
+    annotated_records = completeness["annotated_records"]
+    total_annotations = completeness["total"]
+    remaining_info = _calculate_remaining_articles(completeness["dataset_annotation_counts"])
 
-    total_annotations = len(records)
+    if not annotated_records:
+        return {
+            "total_annotations": total_annotations,
+            "completed_annotations": completeness["completed"],
+            "incomplete_annotations": completeness["incomplete"],
+            "overall_counts": {},
+            "doc_type_distribution": {},
+            "leaderboard": [],
+            "dataset_stats": {},
+            "incomplete_details": completeness["incomplete_details"],
+            "annotation_fields": completeness.get("fields", []),
+            "remaining_articles": remaining_info["total_remaining"],
+            "remaining_by_dataset": remaining_info["remaining_by_dataset"],
+            "dataset_totals": remaining_info["totals_by_dataset"],
+        }
+
     overall_counts = {}
     doc_type_counts = Counter()
     annotator_counts = Counter()
     dataset_counts = Counter()
-    status_counts = Counter()
 
-    # Ethics specific counters
-    ethics_ethicsDeclaration_counts = Counter()
-    ethics_fields_counts = Counter()
-
-    headers = list(records[0].keys()) if records else []
+    headers = list(annotated_records[0].keys()) if annotated_records else (list(records[0].keys()) if records else [])
     boolean_fields = [h for h in headers if h.startswith("trigger_") and not h.endswith("_context")]
     ethics_boolean_fields = [h for h in headers if h.startswith("ethics_COI") and not h.endswith("_context")]
     ethics_fields = [
@@ -395,7 +609,7 @@ async def get_detailed_stats():
         and h not in ethics_boolean_fields
     ]
     
-    for record in records:
+    for record in annotated_records:
         for field in boolean_fields:
             if field not in overall_counts:
                 overall_counts[field] = Counter()
@@ -426,23 +640,28 @@ async def get_detailed_stats():
         if annotator:
             annotator_counts[annotator] += 1
         
-        dataset = record.get("Dataset")
+        dataset = record.get("Dataset") or record.get("dataset") or getattr(state, "currentDataset", "")
         if dataset:
             dataset_counts[dataset] += 1
-            
-        status = record.get("status", "Completed") or "Completed"
-        status_counts[status] += 1
 
     leaderboard = [{"annotator": a, "count": c} for a, c in annotator_counts.most_common()]
+    overall_counts_serialized = {key: dict(counter) for key, counter in overall_counts.items()}
+    dataset_stats_serialized = dict(dataset_counts)
+    doc_type_distribution_serialized = dict(doc_type_counts)
 
     return {
         "total_annotations": total_annotations,
-        "completed_annotations": status_counts.get("Completed", 0),
-        "incomplete_annotations": status_counts.get("Incomplete", 0),
-        "overall_counts": overall_counts,
-        "doc_type_distribution": doc_type_counts,
+        "completed_annotations": completeness["completed"],
+        "incomplete_annotations": completeness["incomplete"],
+        "overall_counts": overall_counts_serialized,
+        "doc_type_distribution": doc_type_distribution_serialized,
         "leaderboard": leaderboard,
-        "dataset_stats": dataset_counts
+        "dataset_stats": dataset_stats_serialized,
+        "incomplete_details": completeness["incomplete_details"],
+        "annotation_fields": completeness.get("fields", []),
+        "remaining_articles": remaining_info["total_remaining"],
+        "remaining_by_dataset": remaining_info["remaining_by_dataset"],
+        "dataset_totals": remaining_info["totals_by_dataset"],
     }
 
 @router.get("/api/reviews")
