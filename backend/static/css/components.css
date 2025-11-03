@@ -275,6 +275,21 @@ select option {
     box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
 }
 
+.boolean-btn[data-value="yes"].active {
+    background-color: rgba(16, 185, 129, 0.8);
+    box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
+}
+
+.boolean-btn[data-value="no"].active {
+    background-color: rgba(239, 68, 68, 0.8);
+    box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
+}
+
+.boolean-btn[data-value="na"].active {
+    background-color: rgba(129, 140, 248, 0.8);
+    box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
+}
+
 /* --- Buttons --- */
 .btn-primary {
     background-color: var(--accent-color);

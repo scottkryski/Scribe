@@ -54,19 +54,27 @@ async function performSubmit(buttonToLoad) {
     return { success: false };
   }
   const annotations = {};
-  state.activeTemplate.fields.forEach((field) => {
-    const element = document.getElementById(field.id);
-    if (element) {
-      let value = element.value;
-      if (field.type === "boolean") {
-        if (value === "true") value = true;
-        else if (value === "false") value = false;
-        else value = null;
+    state.activeTemplate.fields.forEach((field) => {
+      const element = document.getElementById(field.id);
+      if (element) {
+        let value = element.value;
+        if (field.type === "boolean") {
+          if (value === "true") value = true;
+          else if (value === "false") value = false;
+          else value = null;
+        } else if (field.type === "checklist") {
+          try {
+            const parsed = JSON.parse(value || "{}");
+            value = parsed && typeof parsed === "object" ? parsed : {};
+          } catch (error) {
+            console.warn(`Failed to parse checklist value for ${field.id}`, error);
+            value = {};
+          }
+        }
+        annotations[field.id] = value;
+        const contextEl = document.querySelector(`[name="${field.id}_context"]`);
+        if (contextEl) annotations[`${field.id}_context`] = contextEl.value;
       }
-      annotations[field.id] = value;
-      const contextEl = document.querySelector(`[name="${field.id}_context"]`);
-      if (contextEl) annotations[`${field.id}_context`] = contextEl.value;
-    }
   });
   const payload = {
     dataset: state.currentDataset,

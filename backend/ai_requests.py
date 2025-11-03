@@ -222,9 +222,42 @@ def _generate_augmentation_prompt(title: str, abstract: str, annotations: Dict[s
     for field in template.get("fields", []):
         field_id = field.get("id")
         field_label = field.get("label")
+        if not (field_id and field_label):
+            continue
         annotation_value = annotations.get(field_id)
-        if field_id and field_label and annotation_value is not None:
-            logic_summary += f'- The paper MUST be classifiable as **"{annotation_value}"** for the field **"{field_label}"**.\\n'
+        if annotation_value is None:
+            continue
+        field_type = field.get("type")
+        value_text = annotation_value
+        if field_type == "checklist" and isinstance(annotation_value, dict):
+            item_summaries = []
+            for item in field.get("checklistItems", []):
+                item_id = item.get("id")
+                if not item_id:
+                    continue
+                selection = annotation_value.get(item_id)
+                if selection in (None, "", "na"):
+                    continue
+                label = item.get("label") or item_id
+                if isinstance(selection, str):
+                    lowered = selection.lower()
+                    if lowered == "yes":
+                        status = "YES"
+                    elif lowered == "no":
+                        status = "NO"
+                    elif lowered == "na":
+                        status = "N/A"
+                    else:
+                        status = selection
+                else:
+                    status = str(selection)
+                item_summaries.append(f"{label}: {status}")
+            value_text = (
+                "; ".join(item_summaries)
+                if item_summaries
+                else "No checklist selections recorded"
+            )
+        logic_summary += f'- The paper MUST be classifiable as **"{value_text}"** for the field **"{field_label}"**.\\n'
 
     prompt = f"""
 **ROLE AND GOAL**

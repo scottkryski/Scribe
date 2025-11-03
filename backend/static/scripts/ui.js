@@ -19,6 +19,51 @@ function escapeHtml(value) {
   );
 }
 
+function parseChecklistState(rawValue) {
+  if (!rawValue) return {};
+  try {
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    console.warn("Failed to parse checklist state:", error);
+    return {};
+  }
+}
+
+function buildChecklistState(hiddenInput, incoming) {
+  const baseState = parseChecklistState(
+    hiddenInput?.dataset?.defaultState || "{}"
+  );
+  const nextState = { ...baseState };
+  let source = incoming;
+  if (typeof source === "string") {
+    source = parseChecklistState(source);
+  }
+  if (source && typeof source === "object") {
+    Object.keys(source).forEach((key) => {
+      nextState[key] = source[key];
+    });
+  }
+  return nextState;
+}
+
+function applyChecklistState(hiddenInput, state, { silent = false } = {}) {
+  if (!hiddenInput) return;
+  const container = hiddenInput.closest(".checklist-field");
+  if (!container) return;
+  const nextState = state && typeof state === "object" ? state : {};
+  hiddenInput.value = JSON.stringify(nextState);
+  container.querySelectorAll(".checklist-choice-btn").forEach((btn) => {
+    const itemId = btn.dataset.itemId;
+    const targetValue =
+      itemId !== undefined ? nextState[itemId] ?? null : null;
+    btn.classList.toggle("active", btn.dataset.value === targetValue);
+  });
+  if (!silent) {
+    hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+}
+
 export function showDebouncedAutoFillNotification() {
   if (autoFillNotifyTimer) {
     clearTimeout(autoFillNotifyTimer);
@@ -114,7 +159,22 @@ function highlightMissingFields(annotationData) {
     if (!fieldId || fieldId.endsWith("_context")) return;
 
     const value = annotationData[fieldId];
-    if (value === undefined || String(value).trim() === "") {
+    const fieldType = element.dataset?.fieldType || "";
+    let isMissing = false;
+    if (fieldType === "checklist") {
+      const hasSelection = value
+        ? Object.values(value).some(
+            (itemValue) =>
+              itemValue !== null &&
+              itemValue !== undefined &&
+              String(itemValue).trim() !== ""
+          )
+        : false;
+      isMissing = !hasSelection;
+    } else if (value === undefined || String(value).trim() === "") {
+      isMissing = true;
+    }
+    if (isMissing) {
       const container = element.closest(".annotation-row");
       if (container) container.classList.add("field-missing");
     }
@@ -129,9 +189,11 @@ function applyExistingAnnotation(annotationData) {
     const element = document.getElementById(key);
 
     if (element) {
+      const fieldType = element.dataset?.fieldType;
       if (
-        element.type === "hidden" &&
-        element.parentElement.classList.contains("boolean-button-group")
+        fieldType === "boolean" ||
+        (element.type === "hidden" &&
+          element.parentElement.classList.contains("boolean-button-group"))
       ) {
         const valueStr =
           String(value).toLowerCase() === "true"
@@ -145,6 +207,9 @@ function applyExistingAnnotation(annotationData) {
           );
           if (btn) btn.click();
         }
+      } else if (fieldType === "checklist") {
+        const mergedState = buildChecklistState(element, value);
+        applyChecklistState(element, mergedState, { silent: true });
       } else {
         element.value = value;
       }
@@ -194,9 +259,12 @@ export function applyGeminiSuggestions(suggestions, activeTemplate) {
 
     element.dataset.aiSuggested = "true";
 
+    const fieldType = element.dataset?.fieldType;
+
     if (
-      element.type === "hidden" &&
-      element.parentElement.classList.contains("boolean-button-group")
+      fieldType === "boolean" ||
+      (element.type === "hidden" &&
+        element.parentElement.classList.contains("boolean-button-group"))
     ) {
       const valueStr = value.toString();
       if (element.value !== valueStr) {
@@ -205,6 +273,9 @@ export function applyGeminiSuggestions(suggestions, activeTemplate) {
         );
         if (btn) btn.click();
       }
+    } else if (fieldType === "checklist") {
+      const mergedState = buildChecklistState(element, value);
+      applyChecklistState(element, mergedState, { silent: true });
     } else {
       element.value = value;
     }
@@ -276,9 +347,11 @@ function revertAIField(fieldId) {
   );
 
   const previousValue = element.dataset.previousValue;
+  const fieldType = element.dataset?.fieldType;
   if (
-    element.type === "hidden" &&
-    element.parentElement.classList.contains("boolean-button-group")
+    fieldType === "boolean" ||
+    (element.type === "hidden" &&
+      element.parentElement.classList.contains("boolean-button-group"))
   ) {
     if (element.value !== previousValue) {
       const btn = element.parentElement.querySelector(
@@ -293,6 +366,9 @@ function revertAIField(fieldId) {
         element.value = "";
       }
     }
+  } else if (fieldType === "checklist") {
+    const restoredState = buildChecklistState(element, previousValue);
+    applyChecklistState(element, restoredState, { silent: true });
   } else {
     element.value = previousValue;
   }
@@ -354,6 +430,16 @@ export function resetForm() {
       });
 
     dom.annotationForm
+      .querySelectorAll('input[data-field-type="checklist"]')
+      .forEach((hiddenInput) => {
+        const defaultState = parseChecklistState(
+          hiddenInput.dataset.defaultState || "{}"
+        );
+        applyChecklistState(hiddenInput, defaultState, { silent: true });
+        hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
+    dom.annotationForm
       .querySelectorAll("[data-locked='true']")
       .forEach((el) => {
         delete el.dataset.locked;
@@ -392,19 +478,29 @@ export function resetForm() {
 
 export function setupContextToggles() {
   document.querySelectorAll("[data-context-target]").forEach((control) => {
-    control.addEventListener("change", (event) => {
-      const targetId = event.target.dataset.contextTarget;
+    const updateContextVisibility = () => {
+      const targetId = control.dataset.contextTarget;
       const contextBox = document.getElementById(targetId);
       if (contextBox) {
         let shouldShow;
-        if (event.target.tagName === "SELECT") {
-          shouldShow = event.target.value !== "";
+        if (control.tagName === "SELECT") {
+          shouldShow = control.value !== "";
         } else {
-          shouldShow = event.target.value === "true";
+          const fieldType = control.dataset?.fieldType;
+          if (fieldType === "checklist") {
+            const state = parseChecklistState(control.value);
+            shouldShow = Object.values(state).some(
+              (val) => String(val).toLowerCase() === "yes"
+            );
+          } else {
+            shouldShow = control.value === "true";
+          }
         }
         contextBox.classList.toggle("hidden", !shouldShow);
       }
-    });
+    };
+    control.addEventListener("change", updateContextVisibility);
+    updateContextVisibility();
   });
 }
 

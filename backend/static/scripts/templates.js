@@ -8,6 +8,31 @@ let currentTemplateData = null;
 let onTemplateChangeCallback = null;
 let state = {};
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).replace(
+    /[&<>"']/g,
+    (match) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[match] || match)
+  );
+}
+
+function slugify(value) {
+  if (!value) return "";
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 64);
+}
+
 const templateSelector = document.getElementById("template-selector");
 const templateBuilderContainer = document.getElementById(
   "template-builder-container"
@@ -234,9 +259,11 @@ function renderFieldEditor(field, index, allFields) {
     id: `new_field_${Date.now()}`,
     label: "",
     type: "boolean",
+    helperText: "",
     description: "",
     keywords: [],
     options: [],
+    checklistItems: [],
     ai_summary_field: "context",
     autoFillRules: [],
   };
@@ -264,8 +291,15 @@ function renderFieldEditor(field, index, allFields) {
               fieldData.type === "boolean" ? "selected" : ""
             }>Boolean (Toggle)</option><option value="select" ${
     fieldData.type === "select" ? "selected" : ""
-  }>Select (Dropdown)</option></select></div>
+  }>Select (Dropdown)</option><option value="checklist" ${
+    fieldData.type === "checklist" ? "selected" : ""
+  }>Checklist</option></select></div>
             ${optionsHTML}
+            ${
+              fieldData.type === "checklist"
+                ? `<div class="field-checklist-container md:col-span-2"><label class="text-sm font-medium">Checklist Items</label><div class="space-y-3 mt-2 checklist-items-container"></div><button type="button" class="add-checklist-item-btn btn-primary text-xs px-3 py-1 mt-2">Add Checklist Item</button></div>`
+                : ""
+            }
             <div><label class="text-sm font-medium">AI Summary Field</label><select class="custom-select w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-ai-summary-selector"><option value="context" ${
               (fieldData.ai_summary_field || "context") === "context"
                 ? "selected"
@@ -275,6 +309,9 @@ function renderFieldEditor(field, index, allFields) {
   }>Reasoning (Explanation)</option></select></div>
             <div class="md:col-span-2"><label class="text-sm font-medium">Keywords (comma-separated)</label><textarea class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-keywords-textarea" rows="2" placeholder="e.g., experiment, rct, control group">${fieldData.keywords.join(
               ", "
+            )}</textarea></div>
+            <div class="md:col-span-2"><label class="text-sm font-medium">Helper Text (optional)</label><textarea class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-helper-text-textarea" rows="3" placeholder="Shown to annotators under the field label.">${escapeHtml(
+              fieldData.helperText || ""
             )}</textarea></div>
             <div class="md:col-span-2"><label class="text-sm font-medium">AI Prompt Description</label><textarea class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-description-textarea" rows="3" placeholder="Instructions for the AI on how to classify this field.">${
               fieldData.description
@@ -305,6 +342,29 @@ function renderFieldEditor(field, index, allFields) {
   fieldWrapper
     .querySelector(".delete-field-btn")
     .addEventListener("click", () => fieldWrapper.remove());
+  if (fieldData.type === "checklist") {
+    const checklistContainer = fieldWrapper.querySelector(
+      ".checklist-items-container"
+    );
+    const itemsToRender =
+      fieldData.checklistItems && fieldData.checklistItems.length > 0
+        ? fieldData.checklistItems
+        : [{ id: "", label: "", description: "" }];
+    itemsToRender.forEach((item) => {
+      const itemEditor = renderChecklistItemEditor(item);
+      checklistContainer.appendChild(itemEditor);
+    });
+    fieldWrapper
+      .querySelector(".add-checklist-item-btn")
+      .addEventListener("click", () => {
+        const newItemEditor = renderChecklistItemEditor({
+          id: "",
+          label: "",
+          description: "",
+        });
+        checklistContainer.appendChild(newItemEditor);
+      });
+  }
   fieldWrapper
     .querySelector(".field-type-selector")
     .addEventListener("change", (e) => {
@@ -375,6 +435,34 @@ function readFieldDataFromDOM(fieldEditorDiv) {
         autoFillRules.push({ triggerValue, targetId, targetValue });
       }
     });
+  let checklistItems = [];
+  if (type === "checklist") {
+    const usedIds = new Set();
+    fieldEditorDiv.querySelectorAll(".checklist-item-editor").forEach((item) => {
+      const label =
+        item.querySelector(".checklist-item-label")?.value.trim() || "";
+      if (!label) return;
+      const description =
+        item.querySelector(".checklist-item-description")?.value.trim() || "";
+      let itemId =
+        item.querySelector(".checklist-item-id")?.value.trim() || "";
+      if (!itemId) {
+        itemId = slugify(label);
+      }
+      let baseId = itemId || slugify(label) || "item";
+      let counter = 1;
+      while (!itemId || usedIds.has(itemId)) {
+        itemId = counter === 1 ? baseId : `${baseId}_${counter}`;
+        counter += 1;
+      }
+      usedIds.add(itemId);
+      checklistItems.push({
+        id: itemId,
+        label,
+        description,
+      });
+    });
+  }
   return {
     label: getVal(".field-label-input"),
     id: getVal(".field-id-input"),
@@ -382,9 +470,50 @@ function readFieldDataFromDOM(fieldEditorDiv) {
     description: getVal(".field-description-textarea"),
     keywords: getArr(".field-keywords-textarea", ","),
     options: type === "select" ? getArr(".field-options-textarea", "\n") : [],
+    helperText: getVal(".field-helper-text-textarea"),
+    checklistItems: type === "checklist" ? checklistItems : [],
     ai_summary_field: getVal(".field-ai-summary-selector") || "context",
     autoFillRules: autoFillRules,
   };
+}
+
+function renderChecklistItemEditor(item) {
+  const itemData = {
+    id: item?.id || "",
+    label: item?.label || "",
+    description: item?.description || "",
+  };
+  const wrapper = document.createElement("div");
+  wrapper.className =
+    "checklist-item-editor bg-black bg-opacity-20 rounded-lg p-3 space-y-3";
+  wrapper.innerHTML = `
+    <div class="grid grid-cols-1 md:grid-cols-6 gap-3">
+      <div class="md:col-span-2">
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Item Label</label>
+        <input type="text" value="${escapeHtml(
+          itemData.label
+        )}" class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm checklist-item-label" placeholder="e.g., A) Test/model choice justified">
+      </div>
+      <div class="md:col-span-2 md:max-w-xs">
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Item ID</label>
+        <input type="text" value="${escapeHtml(
+          itemData.id
+        )}" class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm checklist-item-id" placeholder="auto-generated">
+      </div>
+      <div class="md:col-span-6">
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Item Description (optional)</label>
+        <textarea class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm checklist-item-description" rows="3" placeholder="Guidance shown beneath the item label.">${escapeHtml(
+          itemData.description
+        )}</textarea>
+      </div>
+    </div>
+    <div class="flex justify-end">
+      <button type="button" class="delete-checklist-item-btn text-xs text-red-300 hover:text-red-200">Remove Item</button>
+    </div>`;
+  wrapper
+    .querySelector(".delete-checklist-item-btn")
+    .addEventListener("click", () => wrapper.remove());
+  return wrapper;
 }
 
 async function saveCurrentLocalTemplate() {

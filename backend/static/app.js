@@ -12,6 +12,21 @@ import { initializeViewManager } from "./scripts/modules/viewManager.js";
 import { initializeLockTimer } from "./scripts/modules/lockTimer.js";
 import { initializeDashboard } from "./scripts/modules/dashboard.js";
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).replace(
+    /[&<>"']/g,
+    (match) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[match] || match)
+  );
+}
+
 async function waitForServerReady() {
   return new Promise((resolve) => {
     ui.showLoading("Connecting to Server", "Please wait...");
@@ -126,6 +141,140 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     state.activeTemplate = template;
     dom.annotationFieldsContainer.innerHTML = "";
+
+    const parseChecklistState = (raw) => {
+      if (!raw) return {};
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch (error) {
+        console.warn("Failed to parse checklist state:", error);
+        return {};
+      }
+    };
+
+    const updateChecklistSelection = (
+      fieldContainer,
+      itemId,
+      nextValue,
+      { allowToggle = false, silent = false } = {}
+    ) => {
+      if (!fieldContainer) return;
+      const hiddenInput = fieldContainer.querySelector(
+        'input[type="hidden"][data-field-type="checklist"]'
+      );
+      if (!hiddenInput) return;
+      const currentState = parseChecklistState(hiddenInput.value);
+      const currentValue = currentState[itemId] ?? null;
+      let valueToApply = nextValue;
+      if (allowToggle && currentValue === nextValue) {
+        valueToApply = null;
+      }
+      currentState[itemId] = valueToApply;
+      hiddenInput.value = JSON.stringify(currentState);
+      const buttons = fieldContainer.querySelectorAll(
+        `.checklist-choice-btn[data-item-id="${itemId}"]`
+      );
+      buttons.forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.value === valueToApply);
+      });
+      if (!silent) {
+        hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    };
+
+    const initializeChecklistField = (rowElement, fieldDef) => {
+      const container = rowElement.querySelector(
+        `.checklist-field[data-field-id="${fieldDef.id}"]`
+      );
+      if (!container) return;
+      const hiddenInput = container.querySelector(
+        'input[type="hidden"][data-field-type="checklist"]'
+      );
+      const itemsContainer = container.querySelector(
+        ".checklist-items-container"
+      );
+      itemsContainer.innerHTML = "";
+      const checklistItems = Array.isArray(fieldDef.checklistItems)
+        ? fieldDef.checklistItems
+        : [];
+
+      const initialState = {};
+      if (checklistItems.length === 0) {
+        const emptyNotice = document.createElement("p");
+        emptyNotice.className =
+          "text-xs text-gray-300 italic bg-black/20 rounded p-2";
+        emptyNotice.textContent = "No checklist items configured.";
+        itemsContainer.appendChild(emptyNotice);
+      } else {
+        checklistItems.forEach((item) => {
+          const itemId = item.id || "";
+          initialState[itemId] = null;
+
+          const itemRow = document.createElement("div");
+          itemRow.className =
+            "checklist-item bg-black bg-opacity-30 rounded-lg p-3";
+
+          const layout = document.createElement("div");
+          layout.className =
+            "flex flex-col gap-2 md:flex-row md:items-start md:justify-between";
+
+          const textSection = document.createElement("div");
+          textSection.className =
+            "text-sm text-gray-100 leading-snug space-y-1 md:max-w-3xl";
+
+          const titleSpan = document.createElement("span");
+          titleSpan.className = "font-semibold block";
+          titleSpan.textContent = item.label || "";
+          textSection.appendChild(titleSpan);
+
+          if (item.description) {
+            const descSpan = document.createElement("span");
+            descSpan.className = "text-xs text-gray-300 whitespace-pre-line";
+            descSpan.textContent = item.description;
+            textSection.appendChild(descSpan);
+          }
+
+          const buttonSection = document.createElement("div");
+          buttonSection.className =
+            "flex items-center gap-2 flex-wrap checklist-item-buttons";
+
+          const buttonSpecs = [
+            { value: "yes", label: "YES" },
+            { value: "no", label: "NO" },
+            { value: "na", label: "N/A" },
+          ];
+
+          buttonSpecs.forEach(({ value, label }) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "boolean-btn checklist-choice-btn";
+            btn.dataset.itemId = itemId;
+            btn.dataset.value = value;
+            btn.textContent = label;
+            btn.addEventListener("click", () => {
+              updateChecklistSelection(container, itemId, value, {
+                allowToggle: true,
+              });
+            });
+            buttonSection.appendChild(btn);
+          });
+
+          layout.appendChild(textSection);
+          layout.appendChild(buttonSection);
+          itemRow.appendChild(layout);
+          itemsContainer.appendChild(itemRow);
+        });
+      }
+
+      const serializedState = JSON.stringify(initialState);
+      hiddenInput.value = serializedState;
+      hiddenInput.dataset.defaultState = serializedState;
+      hiddenInput.dataset.itemIds = checklistItems
+        .map((item) => item.id || "")
+        .join(",");
+    };
+
     template.fields.forEach((field) => {
       const row = document.createElement("div");
       row.className = "annotation-row glass-effect rounded-xl p-3";
@@ -142,23 +291,35 @@ document.addEventListener("DOMContentLoaded", () => {
       const aiActionButtonsHTML = `<button type="button" class="ai-action-btn revert-ai-btn hidden" data-revert-target="${field.id}" title="Revert AI Suggestion"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button><button type="button" class="ai-action-btn clear-ai-btn hidden" data-clear-target="${field.id}" title="Clear AI Suggestion & Context"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>`;
       let controlHTML = "";
       if (field.type === "boolean") {
-        controlHTML = `<div class="boolean-button-group"><button type="button" class="boolean-btn" data-value="true">TRUE</button><button type="button" class="boolean-btn" data-value="false">FALSE</button><input type="hidden" id="${field.id}" name="${field.id}" value="" data-context-target="${field.id}_context"></div>`;
+        controlHTML = `<div class="boolean-button-group"><button type="button" class="boolean-btn" data-value="true">TRUE</button><button type="button" class="boolean-btn" data-value="false">FALSE</button><input type="hidden" id="${field.id}" name="${field.id}" value="" data-context-target="${field.id}_context" data-field-type="boolean"></div>`;
       } else if (field.type === "select") {
         const optionsHTML = field.options
           .map((opt) => `<option value="${opt}">${opt}</option>`)
           .join("");
-        controlHTML = `<select id="${field.id}" name="${field.id}" data-context-target="${field.id}_context" class="custom-select w-full p-2 bg-white bg-opacity-10 rounded-lg text-white text-sm"><option value="">[Select One]</option>${optionsHTML}</select>`;
+        controlHTML = `<select id="${field.id}" name="${field.id}" data-context-target="${field.id}_context" data-field-type="select" class="custom-select w-full p-2 bg-white bg-opacity-10 rounded-lg text-white text-sm"><option value="">[Select One]</option>${optionsHTML}</select>`;
+      } else if (field.type === "checklist") {
+        controlHTML = `<div class="checklist-field space-y-3 flex-1 w-full" data-field-id="${field.id}"><input type="hidden" id="${field.id}" name="${field.id}" value="" data-context-target="${field.id}_context" data-field-type="checklist"><div class="space-y-3 checklist-items-container"></div></div>`;
       }
       const highlightButtonHTML =
         field.keywords && field.keywords.length > 0
           ? `<button type="button" class="highlight-toggle-btn" data-highlight-trigger="${field.id}" title="Toggle keyword highlights"><svg fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg></button>`
           : "";
-      row.innerHTML = `<div class="flex items-center justify-between gap-2"><div class="flex items-center space-x-2 min-w-0">${highlightButtonHTML}<label for="${field.id}" class="text-gray-200 text-sm font-medium truncate" title="${field.label}">${field.label}</label></div><button type="button" class="reasoning-bubble-btn hidden" data-reasoning-target="${field.id}" aria-label="Show AI reasoning"><svg class="h-4 w-4 text-gray-300 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button></div><div class="flex items-center justify-between gap-4 mt-2">${controlHTML}<div class="flex items-center space-x-1 flex-shrink-0">${aiActionButtonsHTML}${lockButtonHTML}</div></div><div id="${field.id}_context" class="hidden mt-2"><textarea name="${field.id}_context" class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white placeholder-gray-200 text-sm" rows="3" placeholder="Context for '${field.label}'"></textarea></div>`;
+      const helperTextHTML =
+        field.helperText && field.helperText.trim().length > 0
+          ? `<div class="mt-2 text-xs text-gray-300 leading-relaxed whitespace-pre-line">${escapeHtml(
+              field.helperText
+            )}</div>`
+          : "";
+      row.innerHTML = `<div class="flex items-center justify-between gap-2"><div class="flex items-center space-x-2 min-w-0">${highlightButtonHTML}<label for="${field.id}" class="text-gray-200 text-sm font-medium truncate" title="${field.label}">${field.label}</label></div><button type="button" class="reasoning-bubble-btn hidden" data-reasoning-target="${field.id}" aria-label="Show AI reasoning"><svg class="h-4 w-4 text-gray-300 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button></div>${helperTextHTML}<div class="flex items-center justify-between gap-4 mt-2">${controlHTML}<div class="flex items-center space-x-1 flex-shrink-0">${aiActionButtonsHTML}${lockButtonHTML}</div></div><div id="${field.id}_context" class="hidden mt-2"><textarea name="${field.id}_context" class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white placeholder-gray-200 text-sm" rows="3" placeholder="Context for '${field.label}'"></textarea></div>`;
       dom.annotationFieldsContainer.appendChild(row);
+      if (field.type === "checklist") {
+        initializeChecklistField(row, field);
+      }
     });
 
     document.querySelectorAll(".boolean-button-group").forEach((group) => {
       const hiddenInput = group.querySelector('input[type="hidden"]');
+      if (!hiddenInput) return;
       group.querySelectorAll(".boolean-btn").forEach((button) => {
         button.addEventListener("click", () => {
           const selectedValue = button.dataset.value;

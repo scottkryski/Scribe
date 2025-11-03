@@ -1,5 +1,6 @@
 # backend/routers/annotation.py
 import time
+import json
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 from gspread.exceptions import APIError
@@ -206,12 +207,22 @@ def submit_annotation(submission: AnnotationSubmission):
         except (ValueError, APIError):
             cell = None
 
+        def prepare_cell_value(raw_value):
+            if raw_value is None:
+                return ""
+            if isinstance(raw_value, bool):
+                return "TRUE" if raw_value else "FALSE"
+            if isinstance(raw_value, (dict, list)):
+                try:
+                    return json.dumps(raw_value, ensure_ascii=False)
+                except TypeError:
+                    return str(raw_value)
+            return raw_value
+
         row_values = []
         for header in headers:
             value = flat_submission.get(header, "")
-            if value is None:
-                value = ""
-            row_values.append(value)
+            row_values.append(prepare_cell_value(value))
 
         if cell:
             state.worksheet.update(f'A{cell.row}', [row_values], value_input_option='USER_ENTERED')
