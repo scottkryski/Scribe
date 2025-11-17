@@ -33,6 +33,40 @@ function slugify(value) {
     .slice(0, 64);
 }
 
+const DEFAULT_CHECKLIST_CHOICES = [
+  { value: "yes", label: "YES" },
+  { value: "no", label: "NO" },
+  { value: "na", label: "N/A" },
+];
+
+function normalizeChecklistChoices(rawChoices) {
+  if (!Array.isArray(rawChoices)) {
+    return DEFAULT_CHECKLIST_CHOICES.map((choice) => ({ ...choice }));
+  }
+
+  const seen = new Set();
+  const normalized = rawChoices
+    .map((choice) => ({
+      value: String(choice.value || "").trim(),
+      label: String(choice.label || "").trim(),
+    }))
+    .filter((choice) => {
+      if (!choice.value) return false;
+      const key = choice.value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((choice) => ({
+      value: choice.value,
+      label: choice.label || choice.value,
+    }));
+
+  return normalized.length > 0
+    ? normalized
+    : DEFAULT_CHECKLIST_CHOICES.map((choice) => ({ ...choice }));
+}
+
 const templateSelector = document.getElementById("template-selector");
 const templateBuilderContainer = document.getElementById(
   "template-builder-container"
@@ -264,6 +298,9 @@ function renderFieldEditor(field, index, allFields) {
     keywords: [],
     options: [],
     checklistItems: [],
+    checklistChoices: DEFAULT_CHECKLIST_CHOICES.map((choice) => ({
+      ...choice,
+    })),
     ai_summary_field: "context",
     autoFillRules: [],
   };
@@ -275,6 +312,10 @@ function renderFieldEditor(field, index, allFields) {
       ? `<div class="field-options-container md:col-span-2"><label class="text-sm font-medium">Options (one per line)</label><textarea class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-options-textarea" rows="3">${fieldData.options.join(
           "\n"
         )}</textarea></div>`
+      : "";
+  const checklistChoicesHTML =
+    fieldData.type === "checklist"
+      ? `<div class="field-checklist-container md:col-span-2"><label class="text-sm font-medium">Checklist Choices</label><div class="space-y-2 mt-2 checklist-choices-container"></div><button type="button" class="add-checklist-choice-btn btn-primary text-xs px-3 py-1 mt-2">Add Choice</button><p class="text-xs text-gray-300 mt-1">These choices become the buttons for each checklist item. Values must be unique.</p></div>`
       : "";
   fieldWrapper.innerHTML = `
         <div class="flex justify-between items-center"><span class="font-bold text-lg">Field #${
@@ -297,7 +338,7 @@ function renderFieldEditor(field, index, allFields) {
             ${optionsHTML}
             ${
               fieldData.type === "checklist"
-                ? `<div class="field-checklist-container md:col-span-2"><label class="text-sm font-medium">Checklist Items</label><div class="space-y-3 mt-2 checklist-items-container"></div><button type="button" class="add-checklist-item-btn btn-primary text-xs px-3 py-1 mt-2">Add Checklist Item</button></div>`
+                ? `${checklistChoicesHTML}<div class="field-checklist-container md:col-span-2"><label class="text-sm font-medium">Checklist Items</label><div class="space-y-3 mt-2 checklist-items-container"></div><button type="button" class="add-checklist-item-btn btn-primary text-xs px-3 py-1 mt-2">Add Checklist Item</button></div>`
                 : ""
             }
             <div><label class="text-sm font-medium">AI Summary Field</label><select class="custom-select w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-ai-summary-selector"><option value="context" ${
@@ -343,13 +384,31 @@ function renderFieldEditor(field, index, allFields) {
     .querySelector(".delete-field-btn")
     .addEventListener("click", () => fieldWrapper.remove());
   if (fieldData.type === "checklist") {
+    const normalizedChoices = normalizeChecklistChoices(
+      fieldData.checklistChoices
+    );
+    const choicesContainer = fieldWrapper.querySelector(
+      ".checklist-choices-container"
+    );
+    normalizedChoices.forEach((choice) => {
+      const choiceEditor = renderChecklistChoiceEditor(choice);
+      choicesContainer.appendChild(choiceEditor);
+    });
+    fieldWrapper
+      .querySelector(".add-checklist-choice-btn")
+      .addEventListener("click", () => {
+        choicesContainer.appendChild(
+          renderChecklistChoiceEditor({ label: "", value: "" })
+        );
+      });
+
     const checklistContainer = fieldWrapper.querySelector(
       ".checklist-items-container"
     );
     const itemsToRender =
       fieldData.checklistItems && fieldData.checklistItems.length > 0
         ? fieldData.checklistItems
-        : [{ id: "", label: "", description: "" }];
+        : [{ id: "", label: "", description: "", choices: [] }];
     itemsToRender.forEach((item) => {
       const itemEditor = renderChecklistItemEditor(item);
       checklistContainer.appendChild(itemEditor);
@@ -375,6 +434,17 @@ function renderFieldEditor(field, index, allFields) {
       );
       const updatedFieldData = readFieldDataFromDOM(parent);
       updatedFieldData.type = e.target.value;
+      if (
+        updatedFieldData.type === "checklist" &&
+        (!updatedFieldData.checklistChoices ||
+          updatedFieldData.checklistChoices.length === 0)
+      ) {
+        updatedFieldData.checklistChoices = DEFAULT_CHECKLIST_CHOICES.map(
+          (choice) => ({
+            ...choice,
+          })
+        );
+      }
       const newEditor = renderFieldEditor(
         updatedFieldData,
         currentIndex,
@@ -436,6 +506,7 @@ function readFieldDataFromDOM(fieldEditorDiv) {
       }
     });
   let checklistItems = [];
+  let checklistChoices = [];
   if (type === "checklist") {
     const usedIds = new Set();
     fieldEditorDiv.querySelectorAll(".checklist-item-editor").forEach((item) => {
@@ -456,12 +527,62 @@ function readFieldDataFromDOM(fieldEditorDiv) {
         counter += 1;
       }
       usedIds.add(itemId);
+      const useCustomChoices =
+        item.querySelector(".checklist-item-enable-custom")?.checked || false;
+      let itemChoices = [];
+      if (useCustomChoices) {
+        const usedChoiceValues = new Set();
+        item
+          .querySelectorAll(
+            ".checklist-item-choices-container .checklist-choice-editor"
+          )
+          .forEach((el) => {
+            const choiceLabel =
+              el.querySelector(".checklist-choice-label")?.value.trim();
+            const rawChoiceValue = el
+              .querySelector(".checklist-choice-value")
+              ?.value.trim();
+            const choiceValue = rawChoiceValue || slugify(choiceLabel);
+            if (!choiceLabel || !choiceValue) return;
+            const normalizedChoiceValue = choiceValue.toLowerCase();
+            if (usedChoiceValues.has(normalizedChoiceValue)) return;
+            usedChoiceValues.add(normalizedChoiceValue);
+            itemChoices.push({ label: choiceLabel, value: choiceValue });
+          });
+        if (itemChoices.length > 0) {
+          itemChoices = normalizeChecklistChoices(itemChoices);
+        }
+      }
       checklistItems.push({
         id: itemId,
         label,
         description,
+        choices: useCustomChoices ? itemChoices : [],
       });
     });
+
+    const usedChoiceValues = new Set();
+    fieldEditorDiv
+      .querySelectorAll(
+        ".checklist-choices-container .checklist-choice-editor"
+      )
+      .forEach((el) => {
+        const label = el.querySelector(".checklist-choice-label")?.value.trim();
+        const rawValue =
+          el.querySelector(".checklist-choice-value")?.value.trim();
+        const value = rawValue || slugify(label);
+        if (!label || !value) return;
+        const normalizedValue = value.toLowerCase();
+        if (usedChoiceValues.has(normalizedValue)) return;
+        usedChoiceValues.add(normalizedValue);
+        checklistChoices.push({ label, value });
+      });
+
+    if (checklistChoices.length === 0) {
+      checklistChoices = DEFAULT_CHECKLIST_CHOICES.map((choice) => ({
+        ...choice,
+      }));
+    }
   }
   return {
     label: getVal(".field-label-input"),
@@ -472,9 +593,41 @@ function readFieldDataFromDOM(fieldEditorDiv) {
     options: type === "select" ? getArr(".field-options-textarea", "\n") : [],
     helperText: getVal(".field-helper-text-textarea"),
     checklistItems: type === "checklist" ? checklistItems : [],
+    checklistChoices: type === "checklist" ? checklistChoices : [],
     ai_summary_field: getVal(".field-ai-summary-selector") || "context",
     autoFillRules: autoFillRules,
   };
+}
+
+function renderChecklistChoiceEditor(choice, { extraClasses = "" } = {}) {
+  const choiceData = {
+    value: choice?.value || "",
+    label: choice?.label || "",
+  };
+  const wrapper = document.createElement("div");
+  wrapper.className = `checklist-choice-editor bg-black bg-opacity-20 rounded-lg p-3 space-y-3 ${extraClasses}`.trim();
+  wrapper.innerHTML = `
+    <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+      <div class="md:col-span-3">
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Choice Label</label>
+        <input type="text" value="${escapeHtml(
+          choiceData.label
+        )}" class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm checklist-choice-label" placeholder="e.g., Yes (2)">
+      </div>
+      <div class="md:col-span-2 md:max-w-xs">
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Saved Value</label>
+        <input type="text" value="${escapeHtml(
+          choiceData.value
+        )}" class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm checklist-choice-value" placeholder="e.g., yes_2">
+      </div>
+      <div class="md:col-span-1 flex justify-end">
+        <button type="button" class="delete-checklist-choice-btn text-xs text-red-300 hover:text-red-200">Remove</button>
+      </div>
+    </div>`;
+  wrapper
+    .querySelector(".delete-checklist-choice-btn")
+    .addEventListener("click", () => wrapper.remove());
+  return wrapper;
 }
 
 function renderChecklistItemEditor(item) {
@@ -482,7 +635,13 @@ function renderChecklistItemEditor(item) {
     id: item?.id || "",
     label: item?.label || "",
     description: item?.description || "",
+    choices: Array.isArray(item?.choices) ? item.choices : [],
   };
+  const hasCustomChoices =
+    Array.isArray(itemData.choices) && itemData.choices.length > 0;
+  const normalizedChoices = hasCustomChoices
+    ? normalizeChecklistChoices(itemData.choices)
+    : [];
   const wrapper = document.createElement("div");
   wrapper.className =
     "checklist-item-editor bg-black bg-opacity-20 rounded-lg p-3 space-y-3";
@@ -506,6 +665,22 @@ function renderChecklistItemEditor(item) {
           itemData.description
         )}</textarea>
       </div>
+      <div class="md:col-span-6 space-y-2">
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Custom Choices (optional)</label>
+        <div class="flex items-center gap-2 text-xs text-gray-300">
+          <input type="checkbox" class="checklist-item-enable-custom" ${
+            hasCustomChoices ? "checked" : ""
+          }>
+          <span>Use custom choices for this item (otherwise the field defaults apply).</span>
+        </div>
+        <div class="checklist-item-choices-block ${
+          hasCustomChoices ? "" : "hidden"
+        } space-y-2 mt-1">
+          <div class="space-y-2 checklist-item-choices-container"></div>
+          <button type="button" class="add-checklist-item-choice-btn btn-primary text-xs px-3 py-1">Add Choice</button>
+          <p class="text-xs text-gray-400">Each choice renders as a button for this item only. Values must be unique.</p>
+        </div>
+      </div>
     </div>
     <div class="flex justify-end">
       <button type="button" class="delete-checklist-item-btn text-xs text-red-300 hover:text-red-200">Remove Item</button>
@@ -513,6 +688,40 @@ function renderChecklistItemEditor(item) {
   wrapper
     .querySelector(".delete-checklist-item-btn")
     .addEventListener("click", () => wrapper.remove());
+
+  const choicesBlock = wrapper.querySelector(".checklist-item-choices-block");
+  const choicesContainer = wrapper.querySelector(
+    ".checklist-item-choices-container"
+  );
+  if (hasCustomChoices) {
+    normalizedChoices.forEach((choice) => {
+      const editor = renderChecklistChoiceEditor(choice, {
+        extraClasses: "checklist-item-choice-editor",
+      });
+      choicesContainer.appendChild(editor);
+    });
+  }
+  const addChoiceBtn = wrapper.querySelector(".add-checklist-item-choice-btn");
+  addChoiceBtn?.addEventListener("click", () => {
+    choicesContainer.appendChild(
+      renderChecklistChoiceEditor(
+        { label: "", value: "" },
+        { extraClasses: "checklist-item-choice-editor" }
+      )
+    );
+  });
+
+  const toggleCustomCheckbox = wrapper.querySelector(
+    ".checklist-item-enable-custom"
+  );
+  toggleCustomCheckbox?.addEventListener("change", (e) => {
+    const enabled = e.target.checked;
+    choicesBlock.classList.toggle("hidden", !enabled);
+    if (!enabled) {
+      choicesContainer.innerHTML = "";
+    }
+  });
+
   return wrapper;
 }
 

@@ -489,9 +489,17 @@ export function setupContextToggles() {
           const fieldType = control.dataset?.fieldType;
           if (fieldType === "checklist") {
             const state = parseChecklistState(control.value);
-            shouldShow = Object.values(state).some(
-              (val) => String(val).toLowerCase() === "yes"
-            );
+            const positiveList = (control.dataset.checklistPositive || "")
+              .split(",")
+              .filter(Boolean);
+            shouldShow = Object.values(state).some((val) => {
+              if (val === null || val === undefined) return false;
+              const normalized = String(val).toLowerCase();
+              if (positiveList.length > 0) {
+                return positiveList.includes(normalized);
+              }
+              return normalized !== "" && normalized !== "na";
+            });
           } else {
             shouldShow = control.value === "true";
           }

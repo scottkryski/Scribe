@@ -12,6 +12,12 @@ import { initializeViewManager } from "./scripts/modules/viewManager.js";
 import { initializeLockTimer } from "./scripts/modules/lockTimer.js";
 import { initializeDashboard } from "./scripts/modules/dashboard.js";
 
+const DEFAULT_CHECKLIST_CHOICES = [
+  { value: "yes", label: "YES" },
+  { value: "no", label: "NO" },
+  { value: "na", label: "N/A" },
+];
+
 function escapeHtml(value) {
   if (value === null || value === undefined) return "";
   return String(value).replace(
@@ -25,6 +31,58 @@ function escapeHtml(value) {
         "'": "&#39;",
       }[match] || match)
   );
+}
+
+function normalizeChecklistChoices(rawChoices) {
+  if (!Array.isArray(rawChoices)) {
+    return DEFAULT_CHECKLIST_CHOICES.map((choice) => ({ ...choice }));
+  }
+  const seen = new Set();
+  const normalized = rawChoices
+    .map((choice) => ({
+      value: String(choice.value || "").trim(),
+      label: String(choice.label || "").trim(),
+    }))
+    .filter((choice) => {
+      if (!choice.value) return false;
+      const key = choice.value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((choice) => ({
+      value: choice.value,
+      label: choice.label || choice.value,
+    }));
+  return normalized.length > 0
+    ? normalized
+    : DEFAULT_CHECKLIST_CHOICES.map((choice) => ({ ...choice }));
+}
+
+function extractPositiveChecklistValues(choices) {
+  if (!Array.isArray(choices)) return [];
+  const yesValues = choices
+    .filter(
+      (choice) =>
+        choice.value.toLowerCase().startsWith("yes") ||
+        choice.label.toLowerCase().startsWith("yes")
+    )
+    .map((choice) => choice.value.toLowerCase());
+  if (yesValues.length > 0) return yesValues;
+  return choices
+    .map((choice) => choice.value.toLowerCase())
+    .filter((val) => val && val !== "na");
+}
+
+function parseChecklistState(rawValue) {
+  if (!rawValue) return {};
+  try {
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    console.warn("Failed to parse checklist state:", error);
+    return {};
+  }
 }
 
 async function waitForServerReady() {
@@ -198,6 +256,27 @@ document.addEventListener("DOMContentLoaded", () => {
       const checklistItems = Array.isArray(fieldDef.checklistItems)
         ? fieldDef.checklistItems
         : [];
+      const defaultButtonSpecs = normalizeChecklistChoices(
+        fieldDef.checklistChoices
+      );
+      const positiveSet = new Set(
+        extractPositiveChecklistValues(defaultButtonSpecs)
+      );
+
+      const topActions = document.createElement("div");
+      topActions.className =
+        "flex items-center justify-between gap-2 py-1 checklist-top-actions";
+      const markAllBtn = document.createElement("button");
+      markAllBtn.type = "button";
+      markAllBtn.className = "boolean-btn checklist-mark-all-na-btn";
+      markAllBtn.textContent = "Mark Entire Checklist N/A";
+      const hint = document.createElement("span");
+      hint.className = "text-xs text-gray-300";
+      hint.textContent =
+        "Sets every item to N/A; you can still adjust single items afterward.";
+      topActions.appendChild(markAllBtn);
+      topActions.appendChild(hint);
+      container.insertBefore(topActions, itemsContainer);
 
       const initialState = {};
       if (checklistItems.length === 0) {
@@ -212,39 +291,36 @@ document.addEventListener("DOMContentLoaded", () => {
           initialState[itemId] = null;
 
           const itemRow = document.createElement("div");
-          itemRow.className =
-            "checklist-item bg-black bg-opacity-30 rounded-lg p-3";
-
-          const layout = document.createElement("div");
-          layout.className =
-            "flex flex-col gap-2 md:flex-row md:items-start md:justify-between";
+          itemRow.className = "checklist-item";
 
           const textSection = document.createElement("div");
-          textSection.className =
-            "text-sm text-gray-100 leading-snug space-y-1 md:max-w-3xl";
+          textSection.className = "checklist-item-text";
 
           const titleSpan = document.createElement("span");
-          titleSpan.className = "font-semibold block";
+          titleSpan.className = "checklist-item-title";
           titleSpan.textContent = item.label || "";
           textSection.appendChild(titleSpan);
 
           if (item.description) {
             const descSpan = document.createElement("span");
-            descSpan.className = "text-xs text-gray-300 whitespace-pre-line";
+            descSpan.className = "checklist-item-description";
             descSpan.textContent = item.description;
             textSection.appendChild(descSpan);
           }
 
-          const buttonSection = document.createElement("div");
-          buttonSection.className =
-            "flex items-center gap-2 flex-wrap checklist-item-buttons";
+          const actionSection = document.createElement("div");
+          actionSection.className = "checklist-item-actions";
 
-          const buttonSpecs = [
-            { value: "yes", label: "YES" },
-            { value: "no", label: "NO" },
-            { value: "na", label: "N/A" },
-          ];
+          const buttonGroup = document.createElement("div");
+          buttonGroup.className = "checklist-choice-group";
+          actionSection.appendChild(buttonGroup);
 
+          const customChoices = Array.isArray(item.choices)
+            ? item.choices
+            : [];
+          const buttonSpecs = normalizeChecklistChoices(
+            customChoices.length > 0 ? customChoices : defaultButtonSpecs
+          );
           buttonSpecs.forEach(({ value, label }) => {
             const btn = document.createElement("button");
             btn.type = "button";
@@ -257,15 +333,56 @@ document.addEventListener("DOMContentLoaded", () => {
                 allowToggle: true,
               });
             });
-            buttonSection.appendChild(btn);
+            buttonGroup.appendChild(btn);
           });
+          extractPositiveChecklistValues(buttonSpecs).forEach((val) =>
+            positiveSet.add(val)
+          );
 
-          layout.appendChild(textSection);
-          layout.appendChild(buttonSection);
-          itemRow.appendChild(layout);
+          itemRow.appendChild(textSection);
+          itemRow.appendChild(actionSection);
           itemsContainer.appendChild(itemRow);
         });
       }
+
+      const applyState = (nextState, { silent = false } = {}) => {
+        hiddenInput.value = JSON.stringify(nextState);
+        container.querySelectorAll(".checklist-choice-btn").forEach((btn) => {
+          const itemId = btn.dataset.itemId;
+          const targetValue =
+            itemId !== undefined ? nextState[itemId] ?? null : null;
+          btn.classList.toggle("active", btn.dataset.value === targetValue);
+        });
+        if (!silent) {
+          hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      };
+
+      const allItemsMatch = (state, target) =>
+        checklistItems.length > 0 &&
+        checklistItems.every((item) => (state[item.id] ?? null) === target);
+
+      const updateMarkAllLabel = () => {
+        const state = parseChecklistState(hiddenInput.value);
+        const allNA = allItemsMatch(state, "na");
+        markAllBtn.textContent = allNA
+          ? "Clear All N/A"
+          : "Mark Entire Checklist N/A";
+        markAllBtn.dataset.checked = allNA ? "true" : "false";
+      };
+
+      markAllBtn.addEventListener("click", () => {
+        const currentState = parseChecklistState(hiddenInput.value);
+        const allNA = allItemsMatch(currentState, "na");
+        const nextState = {};
+        checklistItems.forEach((item) => {
+          const itemId = item.id || "";
+          if (!itemId) return;
+          nextState[itemId] = allNA ? null : "na";
+        });
+        applyState(nextState);
+        updateMarkAllLabel();
+      });
 
       const serializedState = JSON.stringify(initialState);
       hiddenInput.value = serializedState;
@@ -273,6 +390,10 @@ document.addEventListener("DOMContentLoaded", () => {
       hiddenInput.dataset.itemIds = checklistItems
         .map((item) => item.id || "")
         .join(",");
+
+      hiddenInput.dataset.checklistPositive = Array.from(positiveSet).join(",");
+      hiddenInput.addEventListener("change", updateMarkAllLabel);
+      updateMarkAllLabel();
     };
 
     template.fields.forEach((field) => {
