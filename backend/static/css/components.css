@@ -265,27 +265,27 @@ select option {
     text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
 }
 
-.boolean-btn[data-value="true"].active {
+.boolean-btn[data-value="true" i].active {
     background-color: rgba(16, 185, 129, 0.8);
     box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
 }
 
-.boolean-btn[data-value="false"].active {
+.boolean-btn[data-value="false" i].active {
     background-color: rgba(239, 68, 68, 0.8);
     box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
 }
 
-.boolean-btn[data-value="yes"].active {
+.boolean-btn[data-value^="yes" i].active {
     background-color: rgba(16, 185, 129, 0.8);
     box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
 }
 
-.boolean-btn[data-value="no"].active {
+.boolean-btn[data-value^="no" i].active {
     background-color: rgba(239, 68, 68, 0.8);
     box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
 }
 
-.boolean-btn[data-value="na"].active {
+.boolean-btn[data-value^="na" i].active {
     background-color: rgba(129, 140, 248, 0.8);
     box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
 }
@@ -386,6 +386,13 @@ select option {
 .checklist-choice-group .checklist-choice-btn:hover {
     background-color: var(--glass-hover-bg, rgba(255,255,255,0.12));
     color: var(--text-primary, #ffffff);
+}
+
+.checklist-choice-group
+    .checklist-choice-btn.active:not([data-value^="yes" i]):not([data-value^="no" i]):not([data-value^="na" i]) {
+    background-color: var(--accent-color, rgba(79, 70, 229, 0.8));
+    color: #FFFFFF;
+    box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.2);
 }
 
 /* --- Buttons --- */
