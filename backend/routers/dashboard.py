@@ -1,6 +1,8 @@
 # backend/routers/dashboard.py
 import time
 from collections import Counter
+import json
+import math
 import gspread
 from fastapi import APIRouter, HTTPException
 from typing import Optional
@@ -28,6 +30,13 @@ class ResolveReviewRequest(BaseModel):
     reviewed_by: str
     resolution: str # e.g., "Confirmed Human", "Corrected to AI", or "Pending"
     reasoning: Optional[str]
+
+DEFAULT_CHECKLIST_CHOICES = [
+    {"value": "yes", "label": "YES"},
+    {"value": "no", "label": "NO"},
+    {"value": "na", "label": "N/A"},
+]
+
 
 def _get_reviews_worksheet():
     """Gets the 'Reviews' worksheet, returning None if it does not exist."""
@@ -76,6 +85,18 @@ def get_human_readable_timestamp():
 def is_annotation_complete(record: dict) -> bool:
     """An annotation is considered complete if the 'annotator' field is filled."""
     return bool(record.get('annotator', '').strip())
+
+
+def _get_active_template():
+    """Return the template JSON for the currently connected sheet, if available."""
+    if not state.worksheet:
+        return None
+    try:
+        spreadsheet_id = state.worksheet.spreadsheet.id
+    except Exception:
+        return None
+    return state.SHEET_TEMPLATES.get(spreadsheet_id)
+
 
 def _get_all_records():
     """Helper to safely get all records from the connected worksheet."""
@@ -187,6 +208,299 @@ def _resolve_annotation_fields(headers):
     if from_template:
         return from_template
     return _infer_annotation_fields(headers)
+
+
+def _normalize_bool_value(value):
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, str):
+        upper = value.strip().upper()
+        if upper in ("TRUE", "FALSE"):
+            return upper
+    return None
+
+
+def _normalize_field_value(value, field_type=None):
+    if value is None:
+        return None
+    if field_type == "boolean":
+        return _normalize_bool_value(value)
+    if isinstance(value, str):
+        trimmed = value.strip()
+    else:
+        trimmed = str(value).strip()
+    return trimmed or None
+
+
+def _normalize_choice_map(choices):
+    mapping = {}
+    if not isinstance(choices, list):
+        return mapping
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        raw_value = choice.get("value")
+        raw_label = choice.get("label")
+        value = str(raw_value).strip() if raw_value is not None else ""
+        if not value:
+            continue
+        label = str(raw_label).strip() if raw_label else value
+        lower = value.lower()
+        if lower in mapping:
+            continue
+        mapping[value] = label
+    return mapping
+
+
+def _is_record_complete(record, annotation_fields):
+    if not annotation_fields:
+        return True
+    for field in annotation_fields:
+        value = record.get(field)
+        if _has_meaningful_value(value):
+            continue
+        return False
+    return True
+
+
+def _coerce_number(value):
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(str(value).strip())
+        if math.isfinite(parsed):
+            return parsed
+    except Exception:
+        return None
+    return None
+
+
+def _normalize_scoring_config(scoring):
+    if not isinstance(scoring, dict):
+        return None
+    mode = str(scoring.get("mode") or "sum").strip().lower() or "sum"
+    na_label = (
+        str(scoring.get("naLabel") or scoring.get("na_label") or "N/A").strip()
+        or "N/A"
+    )
+    raw_na_values = (
+        scoring.get("naValues") or scoring.get("na_values") or ["na"]
+    )
+    na_values = []
+    if isinstance(raw_na_values, list):
+        for val in raw_na_values:
+            text = str(val or "").strip().lower()
+            if text:
+                na_values.append(text)
+    elif isinstance(raw_na_values, str):
+        na_values = [
+            part.strip().lower()
+            for part in raw_na_values.split(",")
+            if part.strip()
+        ]
+    if not na_values:
+        na_values = ["na"]
+
+    buckets = []
+    for bucket in scoring.get("buckets") or []:
+        if not isinstance(bucket, dict):
+            continue
+        label = str(bucket.get("label") or "").strip()
+        if not label:
+            continue
+        min_val = _coerce_number(bucket.get("min"))
+        max_val = _coerce_number(bucket.get("max"))
+        if min_val is None and max_val is None:
+            continue
+        buckets.append(
+            {
+                "label": label,
+                "min": min_val,
+                "max": max_val,
+            }
+        )
+    if not buckets:
+        buckets = []
+
+    downgrade_rules = []
+    raw_rules = scoring.get("downgradeRules") or scoring.get("downgrade_rules") or []
+    if isinstance(raw_rules, list):
+        for rule in raw_rules:
+            if not isinstance(rule, dict):
+                continue
+            item_id = (
+                str(rule.get("itemId") or rule.get("item_id") or "").strip()
+            )
+            target_label = (
+                str(rule.get("targetLabel") or rule.get("target_label") or "")
+                .strip()
+            )
+            raw_values = rule.get("matchValues") or rule.get("match_values") or []
+            values = []
+            if isinstance(raw_values, list):
+                for val in raw_values:
+                    text = str(val or "").strip().lower()
+                    if text:
+                        values.append(text)
+            elif isinstance(raw_values, str):
+                values = [
+                    part.strip().lower()
+                    for part in raw_values.split(",")
+                    if part.strip()
+                ]
+            if not item_id or not target_label or not values:
+                continue
+            downgrade_rules.append(
+                {
+                    "item_id": item_id,
+                    "values": values,
+                    "target_label": target_label,
+                }
+            )
+
+    if not buckets and not downgrade_rules:
+        return None
+    return {
+        "mode": mode,
+        "na_label": na_label,
+        "na_values": na_values,
+        "buckets": buckets,
+        "downgrade_rules": downgrade_rules,
+    }
+
+
+def _calculate_checklist_score(parsed_value, scoring_config):
+    if not isinstance(parsed_value, dict) or not parsed_value:
+        return None
+    numeric_values = []
+    na_values = set(scoring_config.get("na_values") or [])
+    forced_label = None
+    downgrade_rules = scoring_config.get("downgrade_rules") or []
+    for val in parsed_value.values():
+        if isinstance(val, str) and val.strip().lower() in na_values:
+            continue
+        coerced = _coerce_number(val)
+        if coerced is None:
+            continue
+        numeric_values.append(coerced)
+
+    for rule in downgrade_rules:
+        item_id = rule.get("item_id")
+        target_label = rule.get("target_label")
+        values = rule.get("values") or []
+        if not item_id or not target_label or not values:
+            continue
+        selected = parsed_value.get(item_id)
+        if selected is None:
+            continue
+        selected_str = str(selected).strip().lower()
+        if not selected_str:
+            continue
+        if selected_str in values:
+            forced_label = target_label
+            break
+
+    if not numeric_values:
+        return {
+            "label": scoring_config.get("na_label") or "N/A",
+            "score": None,
+            "is_na": True,
+            "matched_bucket": False,
+            "forced": False,
+        }
+
+    score_value = sum(numeric_values)
+
+    if forced_label:
+        return {
+            "label": forced_label,
+            "score": score_value,
+            "is_na": False,
+            "matched_bucket": True,
+            "forced": True,
+        }
+
+    matched_bucket = None
+    for bucket in scoring_config.get("buckets", []):
+        min_ok = bucket.get("min") is None or score_value >= bucket["min"]
+        max_ok = bucket.get("max") is None or score_value <= bucket["max"]
+        if min_ok and max_ok:
+            matched_bucket = bucket
+            break
+
+    if matched_bucket:
+        return {
+            "label": matched_bucket.get("label"),
+            "score": score_value,
+            "is_na": False,
+            "matched_bucket": True,
+        }
+
+    return {
+        "label": "Unscored",
+        "score": score_value,
+        "is_na": False,
+        "matched_bucket": False,
+        "forced": False,
+    }
+
+
+def _parse_checklist_value(raw_value):
+    if isinstance(raw_value, dict):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            parsed = json.loads(raw_value)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
+
+
+def _guess_field_type(values):
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, dict):
+            return "checklist"
+        if isinstance(value, str):
+            trimmed = value.strip()
+            if not trimmed:
+                continue
+            if trimmed.upper() in ("TRUE", "FALSE"):
+                return "boolean"
+            try:
+                parsed = json.loads(trimmed)
+                if isinstance(parsed, dict):
+                    return "checklist"
+            except Exception:
+                pass
+        else:
+            return "select"
+    return "select"
+
+
+def _extract_checklist_items(field_def, annotated_records, field_id):
+    if field_def:
+        template_items = [
+            item for item in field_def.get("checklistItems", []) if item.get("id")
+        ]
+        if template_items:
+            return template_items
+
+    inferred_ids = set()
+    for record in annotated_records:
+        parsed = _parse_checklist_value(record.get(field_id))
+        if not isinstance(parsed, dict):
+            continue
+        for key in parsed.keys():
+            key_str = str(key).strip()
+            if key_str:
+                inferred_ids.add(key_str)
+    return [{"id": item_id, "label": item_id, "choices": []} for item_id in sorted(inferred_ids)]
 
 
 def _calculate_annotation_completeness(records):
@@ -589,50 +903,218 @@ async def get_detailed_stats():
             "dataset_stats": {},
             "incomplete_details": completeness["incomplete_details"],
             "annotation_fields": completeness.get("fields", []),
+            "field_breakdowns": [],
             "remaining_articles": remaining_info["total_remaining"],
             "remaining_by_dataset": remaining_info["remaining_by_dataset"],
             "dataset_totals": remaining_info["totals_by_dataset"],
         }
 
     overall_counts = {}
+    field_breakdowns = []
     doc_type_counts = Counter()
     annotator_counts = Counter()
     dataset_counts = Counter()
 
     headers = list(annotated_records[0].keys()) if annotated_records else (list(records[0].keys()) if records else [])
-    boolean_fields = [h for h in headers if h.startswith("trigger_") and not h.endswith("_context")]
-    ethics_boolean_fields = [h for h in headers if h.startswith("ethics_COI") and not h.endswith("_context")]
-    ethics_fields = [
-        h
-        for h in headers
-        if h.startswith("ethics_")
-        and not h.endswith("_context")
-        and h not in ethics_boolean_fields
+    template = _get_active_template()
+    template_fields = []
+    header_set = set(headers)
+
+    if template:
+        for field in template.get("fields", []):
+            field_id = field.get("id")
+            if field_id and field_id in header_set:
+                template_fields.append(field)
+
+    template_order = {field.get("id"): idx for idx, field in enumerate(template_fields) if field.get("id")}
+
+    annotation_field_ids = completeness.get("fields", [])
+    field_definitions = []
+    seen_ids = set()
+
+    for field_id in annotation_field_ids:
+        if not field_id or field_id in seen_ids:
+            continue
+        template_field = next((f for f in template_fields if f.get("id") == field_id), None)
+        if template_field:
+            field_definitions.append(template_field)
+        else:
+            values = [record.get(field_id) for record in annotated_records]
+            field_definitions.append({
+                "id": field_id,
+                "label": field_id,
+                "type": _guess_field_type(values),
+            })
+        seen_ids.add(field_id)
+
+    for field in template_fields:
+        field_id = field.get("id")
+        if field_id and field_id not in seen_ids:
+            field_definitions.append(field)
+            seen_ids.add(field_id)
+
+    def _field_sort_key(field_def):
+        fid = field_def.get("id") or ""
+        return (template_order.get(fid, len(template_order)), fid)
+
+    field_definitions.sort(key=_field_sort_key)
+    completed_records = [
+        record
+        for record in annotated_records
+        if _is_record_complete(record, annotation_field_ids)
     ]
-    
+
+    for field_def in field_definitions:
+        field_id = field_def.get("id")
+        if not field_id:
+            continue
+
+        field_label = field_def.get("label") or field_id
+        field_type = (field_def.get("type") or "").lower()
+        field_values = [record.get(field_id) for record in annotated_records]
+        if field_type not in ("boolean", "select", "checklist"):
+            field_type = _guess_field_type(field_values)
+
+        if field_type == "checklist":
+            item_defs = _extract_checklist_items(field_def, annotated_records, field_id)
+            if not item_defs:
+                continue
+
+            default_choice_labels = (
+                _normalize_choice_map(field_def.get("checklistChoices"))
+                or _normalize_choice_map(DEFAULT_CHECKLIST_CHOICES)
+            )
+            item_counters = {item["id"]: Counter() for item in item_defs if item.get("id")}
+            scoring_config = _normalize_scoring_config(
+                field_def.get("checklistScoring")
+            )
+            score_bucket_counts = Counter()
+            score_na_count = 0
+            score_unscored_count = 0
+            score_total_responses = 0
+
+            for record in completed_records:
+                parsed = _parse_checklist_value(record.get(field_id))
+                if not isinstance(parsed, dict):
+                    continue
+                if scoring_config:
+                    score_result = _calculate_checklist_score(
+                        parsed, scoring_config
+                    )
+                    if score_result:
+                        score_total_responses += 1
+                        if score_result.get("is_na"):
+                            score_na_count += 1
+                        elif score_result.get("matched_bucket"):
+                            score_bucket_counts[score_result.get("label")] += 1
+                        else:
+                            score_unscored_count += 1
+                for item in item_defs:
+                    item_id = item.get("id")
+                    if not item_id:
+                        continue
+                    selection = parsed.get(item_id)
+                    normalized_selection = _normalize_field_value(selection)
+                    if not normalized_selection:
+                        continue
+                    item_counters[item_id][normalized_selection] += 1
+
+            items_payload = []
+            for item in item_defs:
+                item_id = item.get("id")
+                if not item_id:
+                    continue
+                counter = item_counters.get(item_id, Counter())
+                if not counter:
+                    continue
+                choice_labels = (
+                    _normalize_choice_map(item.get("choices"))
+                    or default_choice_labels
+                )
+                items_payload.append({
+                    "id": item_id,
+                    "label": item.get("label") or item_id,
+                    "counts": dict(counter),
+                    "total": sum(counter.values()),
+                    "choices": choice_labels,
+                })
+                overall_counts[f"{field_id}::{item_id}"] = counter
+
+            score_summary = None
+            if scoring_config:
+                buckets_payload = []
+                configured_labels = set()
+                for bucket in scoring_config.get("buckets", []):
+                    configured_labels.add(bucket.get("label"))
+                    buckets_payload.append(
+                        {
+                            "label": bucket.get("label"),
+                            "min": bucket.get("min"),
+                            "max": bucket.get("max"),
+                            "count": score_bucket_counts.get(
+                                bucket.get("label"), 0
+                            ),
+                        }
+                    )
+                extra_labels = [
+                    label
+                    for label in score_bucket_counts.keys()
+                    if label not in configured_labels
+                ]
+                for label in extra_labels:
+                    buckets_payload.append(
+                        {
+                            "label": label,
+                            "min": None,
+                            "max": None,
+                            "count": score_bucket_counts.get(label, 0),
+                        }
+                    )
+
+                score_summary = {
+                    "mode": scoring_config.get("mode", "sum"),
+                    "buckets": buckets_payload,
+                    "na_label": scoring_config.get("na_label") or "N/A",
+                    "na_count": score_na_count,
+                    "unscored_count": score_unscored_count,
+                    "total_responses": score_total_responses,
+                }
+
+            if items_payload:
+                field_breakdowns.append({
+                    "id": field_id,
+                    "label": field_label,
+                    "type": "checklist",
+                    "items": items_payload,
+                    "total": sum(item.get("total", 0) for item in items_payload),
+                    "score_summary": score_summary,
+                })
+            continue
+
+        counter = Counter()
+        for value in field_values:
+            normalized_value = (
+                _normalize_bool_value(value)
+                if field_type == "boolean"
+                else _normalize_field_value(value)
+            )
+            if not normalized_value:
+                continue
+            counter[normalized_value] += 1
+
+        if not counter:
+            continue
+
+        overall_counts[field_id] = counter
+        field_breakdowns.append({
+            "id": field_id,
+            "label": field_label,
+            "type": "boolean" if field_type == "boolean" else "select",
+            "counts": dict(counter),
+            "total": sum(counter.values()),
+        })
+
     for record in annotated_records:
-        for field in boolean_fields:
-            if field not in overall_counts:
-                overall_counts[field] = Counter()
-            value = str(record.get(field, "")).upper()
-            if value in ["TRUE", "FALSE"]:
-                overall_counts[field][value] += 1
-
-        for field in ethics_boolean_fields:
-            if field not in overall_counts:
-                overall_counts[field] = Counter()
-            value = str(record.get(field, "")).upper()
-            if value in ["TRUE", "FALSE"]:
-                overall_counts[field][value] += 1
-
-        for field in ethics_fields:
-            if field not in overall_counts:
-                overall_counts[field] = Counter()
-            raw_value = record.get(field, "")
-            value = str(raw_value).strip()
-            if value:
-                overall_counts[field][value] += 1
-
         doc_type = record.get("attribute_docType")
         if doc_type:
             doc_type_counts[doc_type] += 1
@@ -655,6 +1137,7 @@ async def get_detailed_stats():
         "completed_annotations": completeness["completed"],
         "incomplete_annotations": completeness["incomplete"],
         "overall_counts": overall_counts_serialized,
+        "field_breakdowns": field_breakdowns,
         "doc_type_distribution": doc_type_distribution_serialized,
         "leaderboard": leaderboard,
         "dataset_stats": dataset_stats_serialized,

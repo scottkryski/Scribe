@@ -80,7 +80,17 @@
   transition: max-height .5s ease, margin-top .5s ease, padding-top .5s ease, border-top-width .5s ease;
 }
 .settings-accordion-content.open {
-  max-height: 20000px; margin-top: 1.5rem; padding-top: 1.5rem; border-top-width: 1px;
+  max-height: none;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  padding-bottom: 4rem;
+  border-top-width: 1px;
+  overflow: visible;
+}
+
+#template-builder-container {
+  padding-bottom: 3rem;
+  margin-bottom: 2rem;
 }
 
 /* ========== Inputs ========== */

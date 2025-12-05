@@ -67,6 +67,76 @@ function normalizeChecklistChoices(rawChoices) {
     : DEFAULT_CHECKLIST_CHOICES.map((choice) => ({ ...choice }));
 }
 
+function normalizeChecklistScoring(scoring) {
+  if (!scoring || typeof scoring !== "object") return null;
+  const mode = String(scoring.mode || "sum").trim() || "sum";
+  const naLabel = scoring.naLabel ? String(scoring.naLabel).trim() : "N/A";
+  let naValues = [];
+  if (Array.isArray(scoring.naValues)) {
+    naValues = scoring.naValues
+      .map((v) => String(v || "").trim())
+      .filter(Boolean);
+  } else if (typeof scoring.naValues === "string") {
+    naValues = scoring.naValues
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+  if (naValues.length === 0) {
+    naValues = ["na"];
+  }
+  const buckets = Array.isArray(scoring.buckets)
+    ? scoring.buckets
+        .map((bucket) => ({
+          label: bucket?.label ? String(bucket.label).trim() : "",
+          min:
+            bucket?.min === 0 || Number.isFinite(Number(bucket?.min))
+              ? Number(bucket.min)
+              : null,
+          max:
+            bucket?.max === 0 || Number.isFinite(Number(bucket?.max))
+              ? Number(bucket.max)
+              : null,
+        }))
+        .filter(
+          (bucket) =>
+            bucket.label && (bucket.min !== null || bucket.max !== null)
+        )
+    : [];
+  const downgradeRules = Array.isArray(scoring.downgradeRules)
+    ? scoring.downgradeRules
+        .map((rule) => ({
+          itemId: rule?.itemId
+            ? String(rule.itemId).trim()
+            : rule?.item_id
+            ? String(rule.item_id).trim()
+            : "",
+          matchValues: Array.isArray(rule?.matchValues)
+            ? rule.matchValues
+                .map((v) => String(v || "").trim())
+                .filter(Boolean)
+            : [],
+          targetLabel: rule?.targetLabel
+            ? String(rule.targetLabel).trim()
+            : rule?.target_label
+            ? String(rule.target_label).trim()
+            : "",
+        }))
+        .filter(
+          (rule) =>
+            rule.itemId && rule.targetLabel && rule.matchValues.length > 0
+        )
+    : [];
+  if (buckets.length === 0 && downgradeRules.length === 0) return null;
+  return {
+    mode,
+    naLabel: naLabel || "N/A",
+    naValues,
+    buckets,
+    downgradeRules,
+  };
+}
+
 const templateSelector = document.getElementById("template-selector");
 const templateBuilderContainer = document.getElementById(
   "template-builder-container"
@@ -301,6 +371,7 @@ function renderFieldEditor(field, index, allFields) {
     checklistChoices: DEFAULT_CHECKLIST_CHOICES.map((choice) => ({
       ...choice,
     })),
+    checklistScoring: null,
     ai_summary_field: "context",
     autoFillRules: [],
   };
@@ -316,6 +387,66 @@ function renderFieldEditor(field, index, allFields) {
   const checklistChoicesHTML =
     fieldData.type === "checklist"
       ? `<div class="field-checklist-container md:col-span-2"><label class="text-sm font-medium">Checklist Choices</label><div class="space-y-2 mt-2 checklist-choices-container"></div><button type="button" class="add-checklist-choice-btn btn-primary text-xs px-3 py-1 mt-2">Add Choice</button><p class="text-xs text-gray-300 mt-1">These choices become the buttons for each checklist item. Values must be unique.</p></div>`
+      : "";
+  const scoringConfig = normalizeChecklistScoring(fieldData.checklistScoring);
+  const scoringEnabled = Boolean(scoringConfig);
+  const checklistScoringHTML =
+    fieldData.type === "checklist"
+      ? `<div class="field-checklist-container md:col-span-2">
+            <div class="flex items-center justify-between gap-2">
+              <label class="text-sm font-medium">Checklist Scoring (Statistics)</label>
+              <label class="flex items-center gap-2 text-xs text-gray-300">
+                <input type="checkbox" class="checklist-enable-scoring" ${
+                  scoringEnabled ? "checked" : ""
+                }>
+                <span>Show score buckets on stats</span>
+              </label>
+            </div>
+            <div class="checklist-scoring-block ${
+              scoringEnabled ? "" : "hidden"
+            } space-y-3 mt-2">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Mode</label>
+                  <select class="custom-select w-full p-2 bg-black bg-opacity-20 rounded text-white text-sm checklist-scoring-mode">
+                    <option value="sum" ${
+                      (scoringConfig?.mode || "sum") === "sum"
+                        ? "selected"
+                        : ""
+                    }>Sum numeric choices</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs font-medium uppercase tracking-wide text-gray-300">N/A Label</label>
+                  <input type="text" value="${escapeHtml(
+                    scoringConfig?.naLabel || "N/A"
+                  )}" class="w-full p-2 bg-black bg-opacity-20 rounded text-white text-sm checklist-scoring-na-label" placeholder="N/A">
+                </div>
+                <div>
+                  <label class="text-xs font-medium uppercase tracking-wide text-gray-300">N/A Values (comma-separated)</label>
+                  <input type="text" value="${escapeHtml(
+                    (scoringConfig?.naValues || ["na"]).join(", ")
+                  )}" class="w-full p-2 bg-black bg-opacity-20 rounded text-white text-sm checklist-scoring-na-values" placeholder="na, none">
+                </div>
+              </div>
+              <div class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs font-semibold text-gray-300 uppercase tracking-wide">Score Ranges</span>
+                  <button type="button" class="add-scoring-bucket-btn btn-primary text-xs px-3 py-1">Add Range</button>
+                </div>
+                <div class="space-y-2 checklist-scoring-buckets"></div>
+                <p class="text-xs text-gray-400">Example: 0-3 Poor, 4-6 Weak, 7-10 Strong. Leave max blank for an open-ended top range.</p>
+              </div>
+              <div class="space-y-2 pt-2 border-t border-white/10">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs font-semibold text-gray-300 uppercase tracking-wide">Auto Downgrade Rules</span>
+                  <button type="button" class="add-downgrade-rule-btn btn-primary text-xs px-3 py-1">Add Rule</button>
+                </div>
+                <div class="space-y-2 checklist-downgrade-rules"></div>
+                <p class="text-xs text-gray-400">If an item matches, override the bucket to the target label (e.g., force Poor when multiplicity is NO).</p>
+              </div>
+            </div>
+          </div>`
       : "";
   fieldWrapper.innerHTML = `
         <div class="flex justify-between items-center"><span class="font-bold text-lg">Field #${
@@ -341,6 +472,7 @@ function renderFieldEditor(field, index, allFields) {
                 ? `${checklistChoicesHTML}<div class="field-checklist-container md:col-span-2"><label class="text-sm font-medium">Checklist Items</label><div class="space-y-3 mt-2 checklist-items-container"></div><button type="button" class="add-checklist-item-btn btn-primary text-xs px-3 py-1 mt-2">Add Checklist Item</button></div>`
                 : ""
             }
+            ${checklistScoringHTML}
             <div><label class="text-sm font-medium">AI Summary Field</label><select class="custom-select w-full p-2 bg-black bg-opacity-20 rounded-lg text-white text-sm field-ai-summary-selector"><option value="context" ${
               (fieldData.ai_summary_field || "context") === "context"
                 ? "selected"
@@ -423,6 +555,87 @@ function renderFieldEditor(field, index, allFields) {
         });
         checklistContainer.appendChild(newItemEditor);
       });
+
+    const scoringBucketsContainer = fieldWrapper.querySelector(
+      ".checklist-scoring-buckets"
+    );
+    const downgradeRulesContainer = fieldWrapper.querySelector(
+      ".checklist-downgrade-rules"
+    );
+    const scoringToggle = fieldWrapper.querySelector(
+      ".checklist-enable-scoring"
+    );
+    const scoringBlock = fieldWrapper.querySelector(
+      ".checklist-scoring-block"
+    );
+    const addBucketBtn = fieldWrapper.querySelector(
+      ".add-scoring-bucket-btn"
+    );
+    const addDowngradeRuleBtn = fieldWrapper.querySelector(
+      ".add-downgrade-rule-btn"
+    );
+    const bucketsToRender =
+      scoringConfig?.buckets && scoringConfig.buckets.length > 0
+        ? scoringConfig.buckets
+        : [];
+    if (scoringBucketsContainer) {
+      bucketsToRender.forEach((bucket) => {
+        scoringBucketsContainer.appendChild(
+          renderChecklistScoringBucketEditor(bucket)
+        );
+      });
+    }
+    addBucketBtn?.addEventListener("click", () => {
+      scoringBucketsContainer?.appendChild(
+        renderChecklistScoringBucketEditor({ label: "", min: "", max: "" })
+      );
+    });
+    const rulesToRender =
+      scoringConfig?.downgradeRules && scoringConfig.downgradeRules.length > 0
+        ? scoringConfig.downgradeRules
+        : [];
+    if (downgradeRulesContainer) {
+      rulesToRender.forEach((rule) => {
+        downgradeRulesContainer.appendChild(
+          renderChecklistDowngradeRuleEditor(rule)
+        );
+      });
+    }
+    addDowngradeRuleBtn?.addEventListener("click", () => {
+      downgradeRulesContainer?.appendChild(
+        renderChecklistDowngradeRuleEditor({
+          itemId: "",
+          matchValues: [],
+          targetLabel: "",
+        })
+      );
+    });
+    scoringToggle?.addEventListener("change", (e) => {
+      const enabled = e.target.checked;
+      scoringBlock?.classList.toggle("hidden", !enabled);
+      if (
+        enabled &&
+        scoringBucketsContainer &&
+        scoringBucketsContainer.children.length === 0
+      ) {
+        scoringBucketsContainer.appendChild(
+          renderChecklistScoringBucketEditor({ label: "", min: "", max: "" })
+        );
+      }
+      if (
+        enabled &&
+        downgradeRulesContainer &&
+        downgradeRulesContainer.children.length === 0
+      ) {
+        downgradeRulesContainer.appendChild(
+          renderChecklistDowngradeRuleEditor({
+            itemId: "",
+            matchValues: [],
+            targetLabel: "",
+          })
+        );
+      }
+    });
   }
   fieldWrapper
     .querySelector(".field-type-selector")
@@ -507,7 +720,15 @@ function readFieldDataFromDOM(fieldEditorDiv) {
     });
   let checklistItems = [];
   let checklistChoices = [];
+  let checklistScoring = null;
   if (type === "checklist") {
+    const parseNumber = (raw) => {
+      if (raw === null || raw === undefined) return null;
+      const trimmed = String(raw).trim();
+      if (trimmed === "") return null;
+      const num = Number(trimmed);
+      return Number.isFinite(num) ? num : null;
+    };
     const usedIds = new Set();
     fieldEditorDiv.querySelectorAll(".checklist-item-editor").forEach((item) => {
       const label =
@@ -583,6 +804,77 @@ function readFieldDataFromDOM(fieldEditorDiv) {
         ...choice,
       }));
     }
+
+    const scoringEnabled =
+      fieldEditorDiv.querySelector(".checklist-enable-scoring")?.checked ||
+      false;
+    if (scoringEnabled) {
+      const mode =
+        fieldEditorDiv.querySelector(".checklist-scoring-mode")?.value ||
+        "sum";
+      const naLabel =
+        fieldEditorDiv.querySelector(".checklist-scoring-na-label")?.value ||
+        "N/A";
+      const naValuesRaw =
+        fieldEditorDiv.querySelector(".checklist-scoring-na-values")?.value ||
+        "";
+      const naValues = naValuesRaw
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
+      const scoringBuckets = [];
+      const downgradeRules = [];
+      fieldEditorDiv
+        .querySelectorAll(".checklist-scoring-bucket")
+        .forEach((bucketEl) => {
+          const label =
+            bucketEl.querySelector(".scoring-bucket-label")?.value.trim() ||
+            "";
+          if (!label) return;
+          const minVal = parseNumber(
+            bucketEl.querySelector(".scoring-bucket-min")?.value
+          );
+          const maxVal = parseNumber(
+            bucketEl.querySelector(".scoring-bucket-max")?.value
+          );
+          if (minVal === null && maxVal === null) return;
+          scoringBuckets.push({
+            label,
+            min: minVal,
+            max: maxVal,
+          });
+        });
+      fieldEditorDiv
+        .querySelectorAll(".checklist-downgrade-rule")
+        .forEach((ruleEl) => {
+          const itemId =
+            ruleEl.querySelector(".downgrade-item-id")?.value.trim() || "";
+          const matchValuesRaw =
+            ruleEl.querySelector(".downgrade-values")?.value || "";
+          const matchValues = matchValuesRaw
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean);
+          const targetLabel =
+            ruleEl.querySelector(".downgrade-target-label")?.value.trim() ||
+            "";
+          if (!itemId || !targetLabel || matchValues.length === 0) return;
+          downgradeRules.push({
+            itemId,
+            matchValues,
+            targetLabel,
+          });
+        });
+      if (scoringBuckets.length > 0 || downgradeRules.length > 0) {
+        checklistScoring = {
+          mode,
+          naLabel: naLabel || "N/A",
+          naValues: naValues.length > 0 ? naValues : ["na"],
+          buckets: scoringBuckets,
+          downgradeRules,
+        };
+      }
+    }
   }
   return {
     label: getVal(".field-label-input"),
@@ -594,6 +886,7 @@ function readFieldDataFromDOM(fieldEditorDiv) {
     helperText: getVal(".field-helper-text-textarea"),
     checklistItems: type === "checklist" ? checklistItems : [],
     checklistChoices: type === "checklist" ? checklistChoices : [],
+    checklistScoring: type === "checklist" ? checklistScoring : null,
     ai_summary_field: getVal(".field-ai-summary-selector") || "context",
     autoFillRules: autoFillRules,
   };
@@ -626,6 +919,88 @@ function renderChecklistChoiceEditor(choice, { extraClasses = "" } = {}) {
     </div>`;
   wrapper
     .querySelector(".delete-checklist-choice-btn")
+    .addEventListener("click", () => wrapper.remove());
+  return wrapper;
+}
+
+function renderChecklistScoringBucketEditor(bucket) {
+  const bucketData = {
+    label: bucket?.label || "",
+    min:
+      bucket?.min === 0 || bucket?.min === "0" || Number.isFinite(bucket?.min)
+        ? bucket.min
+        : bucket?.min || "",
+    max:
+      bucket?.max === 0 || bucket?.max === "0" || Number.isFinite(bucket?.max)
+        ? bucket.max
+        : bucket?.max || "",
+  };
+  const wrapper = document.createElement("div");
+  wrapper.className =
+    "checklist-scoring-bucket bg-black bg-opacity-20 rounded-lg p-3";
+  wrapper.innerHTML = `
+    <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+      <div class="md:col-span-3">
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Label</label>
+        <input type="text" value="${escapeHtml(
+          bucketData.label
+        )}" class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm scoring-bucket-label" placeholder="e.g., Strong">
+      </div>
+      <div>
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Min</label>
+        <input type="number" step="0.1" value="${bucketData.min ?? ""}" class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm scoring-bucket-min" placeholder="0">
+      </div>
+      <div>
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Max</label>
+        <input type="number" step="0.1" value="${bucketData.max ?? ""}" class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm scoring-bucket-max" placeholder="3">
+      </div>
+      <div class="md:col-span-1 flex justify-end">
+        <button type="button" class="delete-scoring-bucket-btn text-xs text-red-300 hover:text-red-200">Remove</button>
+      </div>
+    </div>`;
+  wrapper
+    .querySelector(".delete-scoring-bucket-btn")
+    .addEventListener("click", () => wrapper.remove());
+  return wrapper;
+}
+
+function renderChecklistDowngradeRuleEditor(rule) {
+  const ruleData = {
+    itemId: rule?.itemId || rule?.item_id || "",
+    matchValues: Array.isArray(rule?.matchValues)
+      ? rule.matchValues.join(", ")
+      : "",
+    targetLabel: rule?.targetLabel || rule?.target_label || "",
+  };
+  const wrapper = document.createElement("div");
+  wrapper.className =
+    "checklist-downgrade-rule bg-black bg-opacity-20 rounded-lg p-3";
+  wrapper.innerHTML = `
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+      <div class="md:col-span-2">
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Item ID</label>
+        <input type="text" value="${escapeHtml(
+          ruleData.itemId
+        )}" class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm downgrade-item-id" placeholder="e.g., multiplicity_handled">
+      </div>
+      <div class="md:col-span-2">
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Match Values (comma-separated)</label>
+        <input type="text" value="${escapeHtml(
+          ruleData.matchValues
+        )}" class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm downgrade-values" placeholder="e.g., 0, no">
+      </div>
+      <div class="md:col-span-1">
+        <label class="text-xs font-medium uppercase tracking-wide text-gray-300">Force Label</label>
+        <input type="text" value="${escapeHtml(
+          ruleData.targetLabel
+        )}" class="w-full p-2 bg-black bg-opacity-40 rounded text-white text-sm downgrade-target-label" placeholder="e.g., Poor">
+      </div>
+      <div class="md:col-span-1 flex justify-end">
+        <button type="button" class="delete-downgrade-rule-btn text-xs text-red-300 hover:text-red-200">Remove</button>
+      </div>
+    </div>`;
+  wrapper
+    .querySelector(".delete-downgrade-rule-btn")
     .addEventListener("click", () => wrapper.remove());
   return wrapper;
 }

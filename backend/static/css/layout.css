@@ -1,5 +1,16 @@
 /* static/layout.css */
 /* This file contains styles for the main page structure and layout containers. */
+.view-root,
+#main-view,
+#settings-view,
+#stats-view,
+#guide-view,
+#dashboard-view {
+    min-height: 100vh;
+    overflow: visible;
+    position: relative;
+}
+
 .page-container {
     max-width: 1280px;
     transition: max-width 0.2s ease-in-out;

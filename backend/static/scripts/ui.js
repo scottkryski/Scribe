@@ -927,54 +927,23 @@ export function renderDetailedStats(stats, summary) {
 
   const breakdownContainer = document.getElementById("stats-overall-breakdown");
   breakdownContainer.innerHTML = "";
+  const fieldBreakdowns = Array.isArray(stats.field_breakdowns)
+    ? stats.field_breakdowns
+    : [];
+  const overallCountsFallback = overall_counts || {};
 
-  for (const key in overall_counts) {
-    const counts = overall_counts[key] || {};
-    const entries = Object.entries(counts).filter(([, count]) => count > 0);
-    if (entries.length === 0) continue;
-
-    const isBooleanField = entries.every(([value]) =>
-      ["TRUE", "FALSE"].includes(value)
-    );
-
-    if (isBooleanField) {
-      const trueCount = counts["TRUE"] || 0;
-      const falseCount = counts["FALSE"] || 0;
-      const totalForField = trueCount + falseCount;
-      const percentage =
-        totalForField > 0 ? ((trueCount / totalForField) * 100).toFixed(1) : 0;
-
-      const card = `
-              <div class="glass-effect p-4 rounded-xl">
-                  <div class="flex justify-between items-center mb-2">
-                      <span class="font-semibold text-gray-200 truncate pr-2">${key}</span>
-                      <div class="text-right leading-tight">
-                          <span class="block text-white font-bold">${trueCount} TRUE</span>
-                          <span class="block text-sm text-gray-400">${falseCount} FALSE</span>
-                      </div>
-                  </div>
-                  <div class="w-full bg-black bg-opacity-20 rounded-full h-2.5">
-                      <div class="bg-purple-500 h-2.5 rounded-full" style="width: ${percentage}%"></div>
-                  </div>
-                  <p class="text-right text-sm text-gray-400 mt-1">${percentage}% TRUE</p>
-              </div>
-          `;
-      breakdownContainer.innerHTML += card;
-      continue;
-    }
-
-    const totalForField = entries.reduce((sum, [, count]) => sum + count, 0);
-    const sortedEntries = entries.sort(([, a], [, b]) => b - a);
-    const rowsHtml = sortedEntries
+  const renderRows = (entries, total, choicesMap = {}) =>
+    entries
       .map(([value, count]) => {
         const label = value || "Unspecified";
         const percentageNumber =
-          totalForField > 0 ? (count / totalForField) * 100 : 0;
+          total > 0 ? Math.min(100, (count / total) * 100) : 0;
         const percentageLabel = percentageNumber.toFixed(1);
+        const friendlyLabel = escapeHtml(choicesMap[value] || label);
         return `
               <div>
                   <div class="flex justify-between items-center text-sm mb-1">
-                      <span class="text-gray-200 truncate pr-2">${label}</span>
+                      <span class="text-gray-200 truncate pr-2">${friendlyLabel}</span>
                       <span class="text-gray-300 flex-shrink-0">${count} (${percentageLabel}%)</span>
                   </div>
                   <div class="w-full bg-black bg-opacity-20 rounded-full h-2">
@@ -985,19 +954,225 @@ export function renderDetailedStats(stats, summary) {
       })
       .join("");
 
-    const card = `
-            <div class="glass-effect p-4 rounded-xl">
-                <div class="flex justify-between items-center mb-2">
-                    <span class="font-semibold text-gray-200 truncate pr-2">${key}</span>
-                    <span class="font-bold text-white">${totalForField}</span>
-                </div>
-                <div class="space-y-2">
-                    ${rowsHtml}
+  const renderBooleanCard = (field) => {
+    const counts = field.counts || {};
+    const trueCount =
+      counts["TRUE"] ||
+      counts["true"] ||
+      counts["True"] ||
+      counts["Yes"] ||
+      0;
+    const falseCount =
+      counts["FALSE"] || counts["false"] || counts["False"] || 0;
+    const totalForField =
+      field.total ??
+      Object.values(counts).reduce((sum, count) => sum + count, 0);
+    if (!totalForField) return "";
+    const percentage =
+      totalForField > 0 ? ((trueCount / totalForField) * 100).toFixed(1) : 0;
+
+    return `
+        <div class="glass-effect p-4 rounded-xl">
+            <div class="flex justify-between items-center mb-2">
+                <span class="font-semibold text-gray-200 truncate pr-2">${escapeHtml(
+                  field.label || field.id
+                )}</span>
+                <div class="text-right leading-tight">
+                    <span class="block text-white font-bold">${trueCount} TRUE</span>
+                    <span class="block text-sm text-gray-400">${falseCount} FALSE</span>
                 </div>
             </div>
+            <div class="w-full bg-black bg-opacity-20 rounded-full h-2.5">
+                <div class="bg-purple-500 h-2.5 rounded-full" style="width: ${percentage}%"></div>
+            </div>
+            <p class="text-right text-sm text-gray-400 mt-1">${percentage}% TRUE</p>
+        </div>
+    `;
+  };
+
+  const renderSelectCard = (field) => {
+    const counts = field.counts || {};
+    const entries = Object.entries(counts).filter(([, count]) => count > 0);
+    if (entries.length === 0) return "";
+    const totalForField =
+      field.total ?? entries.reduce((sum, [, count]) => sum + count, 0);
+    const sortedEntries = entries.sort(([, a], [, b]) => b - a);
+    const rowsHtml = renderRows(sortedEntries, totalForField);
+
+    return `
+        <div class="glass-effect p-4 rounded-xl">
+            <div class="flex justify-between items-center mb-2">
+                <span class="font-semibold text-gray-200 truncate pr-2">${escapeHtml(
+                  field.label || field.id
+                )}</span>
+                <span class="font-bold text-white">${totalForField}</span>
+            </div>
+            <div class="space-y-2">
+                ${rowsHtml}
+            </div>
+        </div>
+    `;
+  };
+
+  const renderChecklistCard = (field) => {
+    const items = Array.isArray(field.items) ? field.items : [];
+    if (items.length === 0) return "";
+    const totalResponses =
+      field.total ?? items.reduce((sum, item) => sum + (item.total || 0), 0);
+    const scoringSummary =
+      field.score_summary || field.scoreSummary || field.scoring || null;
+
+    const formatRange = (bucket) => {
+      const parseNum = (val) => {
+        if (val === null || val === undefined || val === "") return null;
+        const num = Number(val);
+        return Number.isFinite(num) ? num : null;
+      };
+      const minVal = parseNum(bucket.min);
+      const maxVal = parseNum(bucket.max);
+      if (minVal !== null && maxVal !== null) return `${minVal} - ${maxVal}`;
+      if (minVal !== null) return `${minVal}+`;
+      if (maxVal !== null) return `≤ ${maxVal}`;
+      return "";
+    };
+
+    const scoringHtml = (() => {
+      if (!scoringSummary || !Array.isArray(scoringSummary.buckets)) {
+        return "";
+      }
+      const scoreEntries = [];
+      const labelOverrides = {};
+      scoringSummary.buckets.forEach((bucket) => {
+        const label = bucket.label || "";
+        if (!label) return;
+        const count = bucket.count || 0;
+        const rangeLabel = formatRange(bucket);
+        scoreEntries.push([label, count]);
+        if (rangeLabel) {
+          labelOverrides[label] = `${label} (${rangeLabel})`;
+        }
+      });
+      const naLabel = scoringSummary.na_label || scoringSummary.naLabel || "N/A";
+      if (typeof scoringSummary.na_count === "number") {
+        scoreEntries.push([naLabel, scoringSummary.na_count]);
+        labelOverrides[naLabel] = `${naLabel} (no numeric responses)`;
+      }
+      if (scoringSummary.unscored_count) {
+        const unsLabel = "Unscored";
+        scoreEntries.push([unsLabel, scoringSummary.unscored_count]);
+        labelOverrides[unsLabel] = "Unscored (outside configured ranges)";
+      }
+      if (scoreEntries.length === 0) return "";
+      const explicitTotal =
+        typeof scoringSummary.total_responses === "number"
+          ? scoringSummary.total_responses
+          : null;
+      const totalScores =
+        explicitTotal !== null
+          ? explicitTotal
+          : scoreEntries.reduce((sum, [, count]) => sum + (count || 0), 0);
+      const rows = renderRows(scoreEntries, totalScores, labelOverrides);
+      return `
+        <div class="bg-black bg-opacity-20 rounded-lg p-3 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-sm font-semibold text-gray-200">Score summary</span>
+            <span class="text-xs text-gray-400">${totalScores} scored</span>
+          </div>
+          ${rows || `<p class="text-xs text-gray-400">No scoring responses yet.</p>`}
+        </div>
+      `;
+    })();
+
+    const itemsHtml = items
+      .map((item) => {
+        const entries = Object.entries(item.counts || {}).filter(
+          ([, count]) => count > 0
+        );
+        const totalForItem =
+          item.total ?? entries.reduce((sum, [, count]) => sum + count, 0);
+        const sortedEntries = entries.sort(([, a], [, b]) => b - a);
+        const rowsHtml =
+          sortedEntries.length > 0
+            ? renderRows(sortedEntries, totalForItem, item.choices || {})
+            : `<p class="text-xs text-gray-400">No responses yet.</p>`;
+        return `
+            <div class="bg-black bg-opacity-20 rounded-lg p-3 space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-sm font-semibold text-gray-200 truncate pr-2">${escapeHtml(
+                      item.label || item.id
+                    )}</span>
+                    <span class="text-xs text-gray-400">${totalForItem} responses</span>
+                </div>
+                ${rowsHtml}
+            </div>
         `;
-    breakdownContainer.innerHTML += card;
+      })
+      .join("");
+
+    return `
+        <div class="glass-effect p-4 rounded-xl">
+            <div class="flex justify-between items-center mb-2">
+                <span class="font-semibold text-gray-200 truncate pr-2">${escapeHtml(
+                  field.label || field.id
+                )}</span>
+                <span class="text-sm text-gray-400">${totalResponses} responses</span>
+            </div>
+            ${scoringHtml ? `<div class="mb-2">${scoringHtml}</div>` : ""}
+            <div class="space-y-3">
+                ${itemsHtml}
+            </div>
+        </div>
+    `;
+  };
+
+  const cardsHtml = [];
+
+  if (fieldBreakdowns.length > 0) {
+    fieldBreakdowns.forEach((field) => {
+      let card = "";
+      if (field.type === "boolean") {
+        card = renderBooleanCard(field);
+      } else if (field.type === "checklist") {
+        card = renderChecklistCard(field);
+      } else {
+        card = renderSelectCard(field);
+      }
+      if (card) cardsHtml.push(card);
+    });
+  } else {
+    for (const key in overallCountsFallback) {
+      const counts = overallCountsFallback[key] || {};
+      const entries = Object.entries(counts).filter(([, count]) => count > 0);
+      if (entries.length === 0) continue;
+      const isBooleanField = entries.every(([value]) =>
+        ["TRUE", "FALSE", "true", "false"].includes(String(value))
+      );
+      const totalForField = entries.reduce((sum, [, count]) => sum + count, 0);
+      if (isBooleanField) {
+        cardsHtml.push(
+          renderBooleanCard({
+            id: key,
+            label: key,
+            counts,
+            total: totalForField,
+          })
+        );
+      } else {
+        cardsHtml.push(
+          renderSelectCard({
+            id: key,
+            label: key,
+            counts,
+            total: totalForField,
+          })
+        );
+      }
+    }
   }
+
+  breakdownContainer.innerHTML =
+    cardsHtml.join("") ||
+    `<p class="text-sm text-gray-400">No annotation data yet.</p>`;
 
   const docTypeContainer = document.getElementById("stats-doc-type-dist");
   docTypeContainer.innerHTML = "";
