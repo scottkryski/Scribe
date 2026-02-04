@@ -52,6 +52,14 @@ The app needs a Google Service Account to read and write data to your Google She
 2.  Rename the downloaded key file to `credentials.json`.
 3.  Place this `credentials.json` file inside the `backend/` directory.
 
+#### **Adding Another Google Spreadsheet**
+
+You do **not** need a new service account per sheet. You can use the same `backend/credentials.json` for any number of spreadsheets, as long as the service account has access.
+
+1. Create the spreadsheet in Google Sheets.
+2. Click **Share** and add the service account email from `backend/credentials.json` (`client_email`) with **Editor** permission.
+3. In Scribe, open **Settings** and add the sheet **Name** and **URL**. Then select it from the sheet dropdown to connect.
+
 #### **B. Gemini API Key (For AI Suggestions)**
 
 The AI features are powered by a Gemini API Key. This is optional if you only wish to annotate manually.

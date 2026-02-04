@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List
 import gspread.utils
+from gspread.exceptions import APIError
 
 from app_state import state
 from models import ConnectSheetRequest, SheetUrlRequest
@@ -170,6 +171,28 @@ async def connect_to_sheet(request: ConnectSheetRequest):
             "template_timestamp": template_timestamp
         }
 
+    except APIError as e:
+        status_code = getattr(getattr(e, "response", None), "status_code", None)
+        error_details = "Unknown Google API Error"
+        try:
+            error_payload = json.loads(e.response.text)
+            error_details = error_payload.get("error", {}).get("message", e.response.text)
+        except (json.JSONDecodeError, AttributeError):
+            error_details = str(e) or error_details
+
+        print(f"ERROR: Google API error while connecting to sheet: {error_details}")
+
+        if status_code == 403:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Permission denied. Share the spreadsheet with your Google service account "
+                    "email (see `backend/credentials.json` -> `client_email`) and grant it Editor access."
+                ),
+            )
+        if status_code == 404:
+            raise HTTPException(status_code=404, detail="Spreadsheet not found. Check the ID and permissions.")
+        raise HTTPException(status_code=502, detail=f"Google API error: {error_details}")
     except gspread.exceptions.SpreadsheetNotFound:
         raise HTTPException(status_code=404, detail="Spreadsheet not found. Check the ID and permissions.")
     except Exception as e:
