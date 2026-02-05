@@ -18,7 +18,7 @@ from config import (
 from app_state import state
 from ai_requests import configure_genai
 from database import index_dataset_if_needed
-from routers import ai, annotation, dataset, pdf, sheets, system, templates, dashboard # Import dashboard
+from routers import ai, annotation, dataset, pdf, sheets, system, templates, dashboard, benchmark_review # Import dashboard
 
 # --- App Setup ---
 app = FastAPI(title="Scribe API")
@@ -62,6 +62,7 @@ app.include_router(sheets.router)
 app.include_router(system.router)
 app.include_router(templates.router)
 app.include_router(dashboard.router)
+app.include_router(benchmark_review.router)
 
 
 def run_startup_tasks():

@@ -95,7 +95,28 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
         
         if not headers:
             headers = ['doi', 'title', 'dataset', 'annotator', 'lock_annotator', 'lock_timestamp']
-            state.worksheet.update('A1', [headers])
+            try:
+                state.worksheet.update('A1', [headers])
+            except APIError as e:
+                status_code = getattr(getattr(e, "response", None), "status_code", None)
+                error_details = "Unknown Google API Error"
+                try:
+                    error_payload = json.loads(e.response.text)
+                    error_details = error_payload.get("error", {}).get("message", e.response.text)
+                except (json.JSONDecodeError, AttributeError):
+                    error_details = str(e) or error_details
+
+                print(f"ERROR: Google API error while initializing sheet headers: {error_details}")
+                if status_code == 403:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=(
+                            "Permission denied writing to the Google Sheet. Share the spreadsheet with your "
+                            "service account email (`backend/credentials.json` -> `client_email`) and grant "
+                            "it Editor access. Also ensure the first worksheet isn't protected."
+                        ),
+                    )
+                raise HTTPException(status_code=502, detail=f"Google API error: {error_details}")
 
         doi_col_idx = headers.index('doi')
         lock_annotator_col_idx = headers.index('lock_annotator')
@@ -150,6 +171,27 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
                 state.worksheet.append_row([placeholder_row.get(h, "") for h in headers], value_input_option='USER_ENTERED')
             
             full_candidate_paper['lock_info'] = {"locked": True, "remaining_seconds": LOCK_TIMEOUT_SECONDS}
+        except APIError as e:
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            error_details = "Unknown Google API Error"
+            try:
+                error_payload = json.loads(e.response.text)
+                error_details = error_payload.get("error", {}).get("message", e.response.text)
+            except (json.JSONDecodeError, AttributeError):
+                error_details = str(e) or error_details
+
+            print(f"ERROR: Google API error while acquiring lock: {error_details}")
+            if status_code == 403:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "Could not acquire lock: permission denied writing to the Google Sheet. "
+                        "Share the spreadsheet with your service account email "
+                        "(`backend/credentials.json` -> `client_email`) and grant it Editor access. "
+                        "Also ensure the target cells aren't protected."
+                    ),
+                )
+            raise HTTPException(status_code=502, detail=f"Could not acquire lock. Google API error: {error_details}")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Could not acquire lock for paper in Google Sheet. Reason: {e}")
 
@@ -158,7 +200,7 @@ def get_next_paper(dataset: str, annotator: str, pdf_required: bool = True, skip
             full_candidate_paper['existing_annotation'] = state.INCOMPLETE_ANNOTATIONS[candidate_doi]['data']
         
         return full_candidate_paper
-    except (ValueError, APIError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=500, detail=f"A spreadsheet error occurred: {e}")
 
 @router.post("/submit-annotation")

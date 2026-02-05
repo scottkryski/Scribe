@@ -612,3 +612,115 @@ export async function resolveReviewItem(
   }
   return response.json();
 }
+
+// --- Benchmark Reviews (LLM annotation review)
+
+export async function getBenchmarkReviewsOverview() {
+  const response = await fetch(`${API_BASE_URL}/api/benchmark-reviews/overview`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || "Failed to fetch benchmark reviews.");
+  }
+  return response.json();
+}
+
+export async function getBenchmarkReviewsForDoi(doi) {
+  const encoded = encodeURIComponent(doi || "");
+  const response = await fetch(
+    `${API_BASE_URL}/api/benchmark-reviews/doi/${encoded}`
+  );
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.detail || "Failed to fetch benchmark review details."
+    );
+  }
+  return response.json();
+}
+
+export async function getBenchmarkReviewSubmissions(doi, trigger_name) {
+  const encoded = encodeURIComponent(doi || "");
+  const triggerEncoded = encodeURIComponent(trigger_name || "");
+  const triggerQuery = trigger_name ? `&trigger_name=${triggerEncoded}` : "";
+  const response = await fetch(
+    `${API_BASE_URL}/api/benchmark-reviews/submissions?doi=${encoded}${triggerQuery}`
+  );
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.detail || "Failed to fetch benchmark review submissions."
+    );
+  }
+  return response.json();
+}
+
+export async function submitBenchmarkReview(
+  doi,
+  trigger_name,
+  reason_codes,
+  comment
+) {
+  const reviewed_by = localStorage.getItem("annotatorName") || "unknown";
+  const response = await fetch(`${API_BASE_URL}/api/benchmark-reviews/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      doi,
+      trigger_name,
+      reason_codes: reason_codes || [],
+      comment: comment || "",
+      reviewed_by,
+    }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.detail || "Failed to submit benchmark review decision."
+    );
+  }
+  return response.json();
+}
+
+export async function submitBenchmarkReviewBulk(doi, reason_codes, comment, trigger_names) {
+  const reviewed_by = localStorage.getItem("annotatorName") || "unknown";
+  const response = await fetch(
+    `${API_BASE_URL}/api/benchmark-reviews/submit-bulk`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        doi,
+        reason_codes: reason_codes || [],
+        comment: comment || "",
+        reviewed_by,
+        trigger_names: trigger_names || null,
+      }),
+    }
+  );
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || "Failed to submit bulk benchmark review.");
+  }
+  return response.json();
+}
+
+export async function uploadBenchmarkPredictionsJsonl(file, mode = "replace") {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("mode", mode);
+  formData.append(
+    "uploaded_by",
+    localStorage.getItem("annotatorName") || "unknown"
+  );
+  const response = await fetch(`${API_BASE_URL}/api/benchmark-reviews/upload`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.detail || "Failed to upload benchmark predictions."
+    );
+  }
+  return response.json();
+}

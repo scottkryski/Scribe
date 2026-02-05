@@ -933,25 +933,12 @@ async function loadSyntheticData() {
 }
 
 function loadData() {
-  // ADD THIS NEW VARIABLE
-  const reviewsBoard = document.getElementById("dashboard-reviews-board");
-
-  // HIDE/SHOW the correct containers
-  document
-    .getElementById("dashboard-table-container")
-    .classList.toggle("hidden", activeDashboardTab === "reviews");
-  reviewsBoard.classList.toggle("hidden", activeDashboardTab !== "reviews"); // CHANGED
-
   if (activeDashboardTab === "annotations") {
     document.getElementById("columnsBtn").style.display = "block";
     loadAnnotationsData();
   } else if (activeDashboardTab === "synthetic") {
     document.getElementById("columnsBtn").style.display = "none";
     loadSyntheticData();
-  } else if (activeDashboardTab === "reviews") {
-    // ADD THIS BLOCK
-    document.getElementById("columnsBtn").style.display = "none";
-    loadReviewsData();
   }
 }
 
@@ -1003,30 +990,6 @@ function setupEventListeners() {
       loadData();
     });
   });
-
-  document
-    .getElementById("dashboard-reviews-board")
-    .addEventListener("click", handleReviewCardClick);
-
-  document
-    .getElementById("dashboard-reviews-board")
-    .addEventListener("click", (e) => {
-      const toggleBtn = e.target.closest(".toggle-context-btn");
-      if (!toggleBtn) return;
-
-      e.preventDefault();
-      const contextPanel = toggleBtn.nextElementSibling;
-      const isHidden = contextPanel.classList.toggle("hidden");
-
-      const textSpan = toggleBtn.querySelector("span");
-      if (textSpan) {
-        textSpan.textContent = isHidden
-          ? "Show Context Provided to AI"
-          : "Hide Context";
-      }
-    });
-
-  ensureCommentsModal();
   listenersAttached = true;
 }
 

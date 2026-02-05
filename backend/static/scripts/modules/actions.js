@@ -438,7 +438,8 @@ export function initializeActions(_state) {
         }
         ui.showToastNotification("Connected to sheet.", "success");
       } catch (error) {
-        alert(`Failed to connect to sheet: ${error.message}`);
+        const message = error?.message || String(error) || "Unknown error";
+        alert(`Failed to connect to sheet: ${message}`);
         e.target.value = "";
         state.currentSheetId = null;
         document.dispatchEvent(
