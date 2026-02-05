@@ -704,6 +704,29 @@ export async function submitBenchmarkReviewBulk(doi, reason_codes, comment, trig
   return response.json();
 }
 
+export async function submitBenchmarkReviewBulkDetailed(doi, items) {
+  const reviewed_by = localStorage.getItem("annotatorName") || "unknown";
+  const response = await fetch(
+    `${API_BASE_URL}/api/benchmark-reviews/submit-bulk-detailed`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        doi,
+        reviewed_by,
+        items: items || [],
+      }),
+    }
+  );
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.detail || "Failed to submit per-field bulk benchmark review."
+    );
+  }
+  return response.json();
+}
+
 export async function uploadBenchmarkPredictionsJsonl(file, mode = "replace") {
   const formData = new FormData();
   formData.append("file", file);

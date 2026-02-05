@@ -642,6 +642,18 @@ class SubmitBenchmarkReviewBulkRequest(BaseModel):
     trigger_names: Optional[List[str]] = None
 
 
+class SubmitBenchmarkReviewBulkItem(BaseModel):
+    trigger_name: str
+    reason_codes: List[str] = Field(default_factory=list)
+    comment: str = ""
+
+
+class SubmitBenchmarkReviewBulkDetailedRequest(BaseModel):
+    doi: str
+    reviewed_by: str = "unknown"
+    items: List[SubmitBenchmarkReviewBulkItem] = Field(default_factory=list)
+
+
 @router.get("/api/benchmark-reviews/overview")
 async def get_benchmark_reviews_overview():
     try:
@@ -1083,6 +1095,166 @@ async def submit_benchmark_review_bulk(request: SubmitBenchmarkReviewBulkRequest
     updates = []
     updated_fields = 0
     for trigger_name in requested_norm:
+        row_idx = row_index_by_trigger[trigger_name]
+        existing_history = _parse_review_history_from_cell(
+            _get_cell(row_idx, "review_history_json")
+        )
+        existing_review_count = _safe_int(_get_cell(row_idx, "review_count"))
+
+        existing_history.append(
+            {
+                "timestamp_utc": timestamp_utc,
+                "reviewed_by": reviewed_by,
+                "reason_codes": reason_codes,
+                "comment": comment,
+            }
+        )
+        new_review_count = existing_review_count + 1
+
+        col_values = {
+            "review_count": str(new_review_count),
+            "reviewed_at_utc": timestamp_utc,
+            "reviewed_by": reviewed_by,
+            "reason_codes_json": json.dumps(reason_codes, ensure_ascii=False),
+            "comment": comment,
+            "review_history_json": _truncate_cell(
+                json.dumps(existing_history, ensure_ascii=False)
+            ),
+        }
+        for col_name, value in col_values.items():
+            col = headers.index(col_name) + 1
+            updates.append(
+                {
+                    "range": gspread.utils.rowcol_to_a1(row_idx, col),
+                    "values": [[value]],
+                }
+            )
+        updated_fields += 1
+
+    try:
+        ws.batch_update(updates, value_input_option="USER_ENTERED")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed bulk updating rows: {e}")
+
+    global _BENCHMARK_CACHE
+    _BENCHMARK_CACHE = None
+
+    return {"status": "ok", "updated_fields": updated_fields}
+
+
+@router.post("/api/benchmark-reviews/submit-bulk-detailed")
+async def submit_benchmark_review_bulk_detailed(
+    request: SubmitBenchmarkReviewBulkDetailedRequest,
+):
+    cache = _load_benchmark_cache()
+    doi = str(request.doi or "").strip()
+    if not doi:
+        raise HTTPException(status_code=400, detail="Missing DOI.")
+
+    reviewed_by = str(request.reviewed_by or "").strip() or "unknown"
+    items = request.items or []
+    if not items:
+        raise HTTPException(status_code=400, detail="No items to submit.")
+
+    doi_payload = cache.by_doi.get(doi)
+    if not doi_payload:
+        raise HTTPException(status_code=404, detail="DOI not found in benchmark source.")
+
+    incorrect_triggers = {
+        str(item.get("trigger_name") or "").strip()
+        for item in (doi_payload.get("incorrect") or [])
+        if str(item.get("trigger_name") or "").strip()
+    }
+
+    normalized_items: List[Tuple[str, List[str], str]] = []
+    for item in items:
+        trigger_name = str(item.trigger_name or "").strip()
+        if not trigger_name or trigger_name not in incorrect_triggers:
+            continue
+        reason_codes = [
+            str(code).strip()
+            for code in (item.reason_codes or [])
+            if str(code).strip()
+        ]
+        if not reason_codes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing reason_codes for trigger_name '{trigger_name}'.",
+            )
+        comment = str(item.comment or "").strip()
+        normalized_items.append((trigger_name, reason_codes, comment))
+
+    if not normalized_items:
+        raise HTTPException(status_code=400, detail="No valid items to submit.")
+
+    ws, headers = _get_or_create_worksheet(
+        BENCHMARK_REVIEW_SHEET, IDEAL_BENCHMARK_REVIEW_HEADERS
+    )
+    if not ws:
+        raise HTTPException(
+            status_code=409,
+            detail="No spreadsheet connected. Connect to a sheet to submit benchmark reviews.",
+        )
+    if not _is_benchmark_review_table(headers):
+        raise HTTPException(
+            status_code=409,
+            detail="Benchmark predictions are not loaded into the benchmark_review sheet yet. Upload the jsonl first.",
+        )
+
+    try:
+        values = ws.get_all_values()
+    except Exception as e:
+        raise HTTPException(
+            status_code=502, detail=f"Failed reading benchmark_review sheet: {e}"
+        )
+
+    required_cols = [
+        "doi",
+        "trigger_name",
+        "review_count",
+        "reviewed_at_utc",
+        "reviewed_by",
+        "reason_codes_json",
+        "comment",
+        "review_history_json",
+    ]
+    missing_cols = [c for c in required_cols if c not in headers]
+    if missing_cols:
+        raise HTTPException(
+            status_code=502,
+            detail=f"benchmark_review sheet missing columns: {missing_cols}. Re-upload the jsonl to reset headers.",
+        )
+
+    doi_col = headers.index("doi") + 1
+    trigger_col = headers.index("trigger_name") + 1
+
+    row_index_by_trigger: Dict[str, int] = {}
+    for idx, row in enumerate(values[1:], start=2):
+        row_doi = row[doi_col - 1].strip() if len(row) >= doi_col else ""
+        if row_doi != doi:
+            continue
+        row_trigger = row[trigger_col - 1].strip() if len(row) >= trigger_col else ""
+        if row_trigger:
+            row_index_by_trigger[row_trigger] = idx
+
+    missing_rows = [t for (t, _, _) in normalized_items if t not in row_index_by_trigger]
+    if missing_rows:
+        raise HTTPException(
+            status_code=404,
+            detail="Some fields are missing in the benchmark_review sheet. Re-upload the jsonl to populate predictions.",
+        )
+
+    def _get_cell(row_idx: int, col_name: str) -> str:
+        col = headers.index(col_name) + 1
+        if row_idx - 1 >= len(values):
+            return ""
+        row_vals = values[row_idx - 1]
+        return row_vals[col - 1] if len(row_vals) >= col else ""
+
+    timestamp_utc = _utc_now_iso()
+    updates = []
+    updated_fields = 0
+    for trigger_name, reason_codes, comment in normalized_items:
         row_idx = row_index_by_trigger[trigger_name]
         existing_history = _parse_review_history_from_cell(
             _get_cell(row_idx, "review_history_json")
