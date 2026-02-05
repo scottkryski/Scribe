@@ -11,6 +11,7 @@ import { initializeSettings } from "./scripts/modules/settings.js";
 import { initializeViewManager } from "./scripts/modules/viewManager.js";
 import { initializeLockTimer } from "./scripts/modules/lockTimer.js";
 import { initializeDashboard } from "./scripts/modules/dashboard.js";
+import { initializeReviews } from "./scripts/modules/reviews.js";
 
 const DEFAULT_CHECKLIST_CHOICES = [
   { value: "yes", label: "YES" },
@@ -153,12 +154,14 @@ document.addEventListener("DOMContentLoaded", () => {
     },
   });
 
+  const reviews = initializeReviews(state, {});
+
   // FIX: Provide the dashboard module reference to the actions module
   if (actions.setDashboardModule) {
     actions.setDashboardModule(dashboard);
   }
 
-  viewManager = initializeViewManager(state, actions, dashboard);
+  viewManager = initializeViewManager(state, actions, dashboard, reviews);
 
   const settings = initializeSettings(
     state,

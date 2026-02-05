@@ -6,6 +6,7 @@ import { stopLockTimer, startLockTimer } from "./lockTimer.js";
 let state = {};
 let actions = {};
 let dashboardModule = null; // To hold the initialized dashboard module
+let reviewsModule = null;
 
 function setWidescreenIcon(isWidescreen) {
   document.querySelectorAll(".widescreen-toggle-btn").forEach((btn) => {
@@ -89,10 +90,16 @@ function updateActiveNavButton(activeView) {
     .forEach((btn) => btn.classList.add("active-nav"));
 }
 
-export function initializeViewManager(_state, _actions, _dashboardModule) {
+export function initializeViewManager(
+  _state,
+  _actions,
+  _dashboardModule,
+  _reviewsModule
+) {
   state = _state;
   actions = _actions;
   dashboardModule = _dashboardModule;
+  reviewsModule = _reviewsModule;
 
   document.addEventListener("updateFilterUI", (e) => {
     const status = e.detail;
@@ -119,6 +126,7 @@ export function initializeViewManager(_state, _actions, _dashboardModule) {
         dom.guideView,
         dom.statsView,
         dom.dashboardView,
+        dom.reviewsView,
       ].forEach((v) => v.classList.add("hidden"));
 
       switch (viewToShow) {
@@ -133,6 +141,9 @@ export function initializeViewManager(_state, _actions, _dashboardModule) {
           break;
         case dom.dashboardView:
           if (dashboardModule) dashboardModule.loadData();
+          break;
+        case dom.reviewsView:
+          if (reviewsModule) reviewsModule.loadData();
           break;
       }
 

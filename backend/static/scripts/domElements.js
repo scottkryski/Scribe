@@ -12,6 +12,7 @@ export let settingsView = null;
 export let guideView = null;
 export let statsView = null;
 export let dashboardView = null; // New
+export let reviewsView = null;
 
 // --- Controls & Inputs ---
 export let datasetSelector = null;
@@ -91,6 +92,7 @@ export function init() {
   guideView = document.getElementById("guide-view");
   statsView = document.getElementById("stats-view");
   dashboardView = document.getElementById("dashboard-view"); // New
+  reviewsView = document.getElementById("reviews-view");
 
   // --- Controls & Inputs ---
   datasetSelector = document.getElementById("dataset-selector");
