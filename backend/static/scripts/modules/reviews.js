@@ -569,6 +569,9 @@ function renderDoiDetails(doiPayload, submissionsPayload, sheetConnected) {
           <button class="benchmark-submit-all-btn btn-primary bg-blue-600 hover:bg-blue-700" ${
             sheetConnected ? "" : "disabled"
           }>Submit all</button>
+          <button class="benchmark-submit-all-perfield-btn btn-primary bg-emerald-600 hover:bg-emerald-700" ${
+            sheetConnected ? "" : "disabled"
+          }>Submit all (per-field)</button>
         </div>
       </div>
       <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -833,6 +836,75 @@ function setupEventListeners() {
       }
     } catch (error) {
       console.error("Bulk submit failed:", error);
+      ui.showToastNotification(error.message || "Bulk submit failed.", "error");
+    } finally {
+      submitAllBtn.disabled = false;
+    }
+  });
+
+  document.body.addEventListener("click", async (e) => {
+    const submitAllBtn = e.target.closest(".benchmark-submit-all-perfield-btn");
+    if (!submitAllBtn) return;
+    e.preventDefault();
+    if (!overviewCache?.sheet_connected) {
+      ui.showToastNotification("Connect to a spreadsheet to submit.", "warning");
+      return;
+    }
+    if (!selectedDoi) {
+      ui.showToastNotification("Select a DOI first.", "warning");
+      return;
+    }
+
+    const cards = Array.from(document.querySelectorAll(".benchmark-incorrect-item"));
+    if (!cards.length) return;
+
+    const items = [];
+    const missing = [];
+    cards.forEach((card) => {
+      const triggerName =
+        card.querySelector(".benchmark-field-submit-btn")?.dataset?.triggerName ||
+        "";
+      const reasonCodes = Array.from(
+        card.querySelectorAll(".benchmark-reason-checkbox:checked")
+      ).map((el) => el.value);
+      const comment = card.querySelector(".benchmark-comment")?.value || "";
+      if (!triggerName) return;
+      if (!reasonCodes.length) {
+        missing.push(triggerName);
+        card.classList.add("border-red-500/50");
+        return;
+      }
+      items.push({ trigger_name: triggerName, reason_codes: reasonCodes, comment });
+    });
+
+    if (missing.length) {
+      ui.showToastNotification(
+        `Missing reasons for ${missing.length} field(s).`,
+        "warning"
+      );
+      setTimeout(() => {
+        cards.forEach((c) => c.classList.remove("border-red-500/50"));
+      }, 2000);
+      return;
+    }
+
+    try {
+      submitAllBtn.disabled = true;
+      const result = await api.submitBenchmarkReviewBulkDetailed(selectedDoi, items);
+      ui.showToastNotification(
+        `Submitted ${result.updated_fields || items.length} field reviews.`,
+        "success"
+      );
+      await loadData({ keepDoi: true, autoLoadDoi: false });
+      const current = (overviewCache?.queue || []).find((q) => q.doi === selectedDoi);
+      if (current?.fully_reviewed) {
+        const next = pickNextUnreviewed(overviewCache);
+        if (next) await loadDoi(next);
+      } else {
+        await loadDoi(selectedDoi);
+      }
+    } catch (error) {
+      console.error("Per-field bulk submit failed:", error);
       ui.showToastNotification(error.message || "Bulk submit failed.", "error");
     } finally {
       submitAllBtn.disabled = false;
