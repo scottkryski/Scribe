@@ -74,6 +74,10 @@ async function performSubmit(buttonToLoad) {
         annotations[field.id] = value;
         const contextEl = document.querySelector(`[name="${field.id}_context"]`);
         if (contextEl) annotations[`${field.id}_context`] = contextEl.value;
+        const pdfOnlyFlagEl = document.getElementById(`${field.id}_pdf_only`);
+        if (pdfOnlyFlagEl) {
+          annotations[`${field.id}_pdf_only`] = Boolean(pdfOnlyFlagEl.checked);
+        }
       }
   });
   const payload = {

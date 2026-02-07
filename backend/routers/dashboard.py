@@ -139,7 +139,7 @@ _KNOWN_METADATA_FIELDS = {
     "id",
 }
 _METADATA_PREFIXES = ("lock_", "latest_", "ai_", "review_", "comment_", "system_", "bulk_", "generator_", "internal_", "metadata_", "sheet_", "pdf_")
-_METADATA_SUFFIXES = ("_context", "_reasoning", "_timestamp", "_notes", "_note", "_comment", "_comments", "_history", "_url")
+_METADATA_SUFFIXES = ("_context", "_reasoning", "_timestamp", "_notes", "_note", "_comment", "_comments", "_history", "_url", "_pdf_only")
 
 
 def _has_meaningful_value(value) -> bool:

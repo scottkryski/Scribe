@@ -156,7 +156,13 @@ function highlightMissingFields(annotationData) {
 
   requiredElements.forEach((element) => {
     const fieldId = element.id;
-    if (!fieldId || fieldId.endsWith("_context")) return;
+    if (
+      !fieldId ||
+      fieldId.endsWith("_context") ||
+      fieldId.endsWith("_pdf_only")
+    ) {
+      return;
+    }
 
     const value = annotationData[fieldId];
     const fieldType = element.dataset?.fieldType || "";
@@ -210,6 +216,9 @@ function applyExistingAnnotation(annotationData) {
       } else if (fieldType === "checklist") {
         const mergedState = buildChecklistState(element, value);
         applyChecklistState(element, mergedState, { silent: true });
+      } else if (element.type === "checkbox") {
+        const normalized = String(value || "").trim().toLowerCase();
+        element.checked = normalized === "true";
       } else {
         element.value = value;
       }
