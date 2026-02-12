@@ -53,7 +53,12 @@ def write_synthetic_data(spreadsheet: gspread.Spreadsheet, data: List[Dict[str, 
     ]
     annotation_keys = [
         k for k in first_record_annotations.keys() 
-        if k not in EXCLUDED_KEYS and '_context' not in k and '_reasoning' not in k
+        if (
+            k not in EXCLUDED_KEYS
+            and '_context' not in k
+            and '_reasoning' not in k
+            and '_pdf_only' not in k
+        )
     ]
     
     ideal_headers = ["doi", "title", "abstract", "annotator", "dataset"] + sorted(annotation_keys)
