@@ -4,9 +4,40 @@
 # --- Global Constants ---
 
 # Get the absolute path of the directory where this script is located (the project root).
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+if [ -L "$SCRIPT_SOURCE" ]; then
+    SCRIPT_SOURCE="$(readlink -f "$SCRIPT_SOURCE")"
+fi
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" &>/dev/null && pwd)"
 VENV_DIR="$SCRIPT_DIR/backend/venv"
 REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
+SHORTCUT_NAME="Scribe"
+SHORTCUT_DIRS=("$HOME/.local/bin" "$HOME/bin" "/usr/local/bin")
+
+create_shortcut() {
+    local existing_command
+    existing_command=$(command -v "$SHORTCUT_NAME" 2>/dev/null || true)
+    if [ -n "$existing_command" ]; then
+        echo "[info] '$SHORTCUT_NAME' already available at $existing_command."
+        return
+    fi
+
+    local link_target="$SCRIPT_DIR/run.sh"
+    for link_dir in "${SHORTCUT_DIRS[@]}"; do
+        if mkdir -p "$link_dir" >/dev/null 2>&1 && [ -w "$link_dir" ]; then
+            ln -sf "$link_target" "$link_dir/$SHORTCUT_NAME"
+            echo "[info] Installed '$SHORTCUT_NAME' shortcut at $link_dir/$SHORTCUT_NAME."
+            if [[ ":$PATH:" != *":$link_dir:"* ]]; then
+                echo "[hint] Add $link_dir to your PATH to run '$SHORTCUT_NAME' from any shell."
+            fi
+            return
+        fi
+    done
+
+    echo "[warning] Could not install '$SHORTCUT_NAME' shortcut automatically; please symlink $link_target into a directory on your PATH."
+}
+
+create_shortcut
 
 # Fix for Conda users
 if [[ -n "$CONDA_PREFIX" ]]; then
