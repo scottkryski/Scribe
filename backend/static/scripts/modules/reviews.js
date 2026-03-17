@@ -279,6 +279,57 @@ function parseReasonCodes(value) {
   }
 }
 
+function safeJsonParse(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch (e) {
+    return null;
+  }
+}
+
+function formatPayloadKey(key) {
+  return String(key || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function formatPayloadValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function getPayloadFromComponentReasoning(rawComponentReasoning, explicitPayload) {
+  if (
+    explicitPayload &&
+    typeof explicitPayload === "object" &&
+    !Array.isArray(explicitPayload)
+  ) {
+    return explicitPayload;
+  }
+  const parsed = safeJsonParse(rawComponentReasoning);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+
+  if (
+    parsed.payload &&
+    typeof parsed.payload === "object" &&
+    !Array.isArray(parsed.payload)
+  ) {
+    return parsed.payload;
+  }
+
+  return parsed;
+}
+
 function renderSubmissionsForDoi(submissionsPayload) {
   const container = document.getElementById("benchmark-previous-submissions");
   if (!container) return;
@@ -390,6 +441,16 @@ function renderDoiDetails(doiPayload, submissionsPayload, sheetConnected) {
     const fieldSubs = submissionsByTrigger[triggerName] || [];
     const lastSub = fieldSubs.length ? fieldSubs[fieldSubs.length - 1] : null;
     const lastCodes = lastSub ? parseReasonCodes(lastSub.reason_codes_json) : [];
+    const payload = getPayloadFromComponentReasoning(
+      item.component_reasoning,
+      item.payload
+    );
+    const rawComponentReasoning = String(item.component_reasoning || "").trim();
+    const payloadReasoning =
+      payload && typeof payload.reasoning === "string" ? payload.reasoning : "";
+    const payloadEntries = payload
+      ? Object.entries(payload).filter(([key]) => key !== "reasoning")
+      : [];
 
     const reasonsHtml = REASON_CHOICES.map(
       (choice) => `
@@ -475,11 +536,63 @@ function renderDoiDetails(doiPayload, submissionsPayload, sheetConnected) {
         </div>
 
         <div class="mt-3">
-          <div class="text-xs text-gray-400 mb-1">Model reasoning</div>
+          <div class="text-xs text-gray-400 mb-1">Extraction reasoning</div>
           <pre class="text-xs text-gray-300 whitespace-pre-wrap bg-black/20 rounded-lg p-3 border border-white/10"><code>${escapeHtml(
             item.reasoning || ""
           )}</code></pre>
         </div>
+
+        ${
+          payloadEntries.length || payloadReasoning
+            ? `
+          <div class="mt-3">
+            <div class="text-xs text-gray-400 mb-1">LLM payload</div>
+            ${
+              payloadEntries.length
+                ? `<div class="bg-black/20 rounded-lg p-3 border border-white/10 space-y-1">
+                    ${payloadEntries
+                      .map(
+                        ([key, value]) => `
+                          <div class="flex flex-wrap items-start gap-x-2 text-xs">
+                            <span class="text-gray-400">${escapeHtml(
+                              formatPayloadKey(key)
+                            )}:</span>
+                            <span class="text-gray-200 break-all">${escapeHtml(
+                              formatPayloadValue(value)
+                            )}</span>
+                          </div>
+                        `
+                      )
+                      .join("")}
+                  </div>`
+                : ""
+            }
+            ${
+              payloadReasoning
+                ? `<div class="mt-2">
+                    <div class="text-xs text-gray-400 mb-1">LLM payload reasoning</div>
+                    <pre class="text-xs text-gray-300 whitespace-pre-wrap bg-black/20 rounded-lg p-3 border border-white/10"><code>${escapeHtml(
+                      payloadReasoning
+                    )}</code></pre>
+                  </div>`
+                : ""
+            }
+          </div>
+        `
+            : ""
+        }
+        ${
+          rawComponentReasoning && !payloadEntries.length && !payloadReasoning
+            ? `
+          <div class="mt-3">
+            <div class="text-xs text-gray-400 mb-1">LLM component reasoning (raw)</div>
+            <pre class="text-xs text-gray-300 whitespace-pre-wrap bg-black/20 rounded-lg p-3 border border-white/10"><code>${escapeHtml(
+              rawComponentReasoning
+            )}</code></pre>
+          </div>
+        `
+            : ""
+        }
 
         ${chunksBlock}
 

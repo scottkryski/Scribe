@@ -35,6 +35,7 @@ IDEAL_BENCHMARK_REVIEW_HEADERS = [
     "model_label_raw",
     "reasoning",
     "component_reasoning",
+    "payload_json",
     "benchmark",
     "prediction_timestamp",
     "duration",
@@ -116,6 +117,11 @@ def _normalize_evidence_chunks(raw: Any) -> List[Dict[str, Any]]:
 
 
 def _normalize_incorrect_item(trigger_name: str, ev: Dict[str, Any]) -> Dict[str, Any]:
+    payload = ev.get("payload")
+    if payload is None and isinstance(ev.get("component_reasoning"), dict):
+        payload = ev.get("component_reasoning", {}).get("payload")
+    if payload is None and isinstance(ev.get("extraction_result"), dict):
+        payload = ev.get("extraction_result", {}).get("payload")
     return {
         "trigger_name": trigger_name,
         "human_label": ev.get("human_label"),
@@ -123,6 +129,7 @@ def _normalize_incorrect_item(trigger_name: str, ev: Dict[str, Any]) -> Dict[str
         "model_label_raw": ev.get("label_raw"),
         "reasoning": ev.get("reasoning"),
         "component_reasoning": ev.get("component_reasoning"),
+        "payload": payload,
         "benchmark": ev.get("benchmark"),
         "timestamp": ev.get("timestamp"),
         "duration": ev.get("duration"),
@@ -259,6 +266,7 @@ def _build_cache_from_review_sheet_rows(
             "model_label_raw": row.get("model_label_raw"),
             "reasoning": row.get("reasoning"),
             "component_reasoning": row.get("component_reasoning"),
+            "payload": _parse_json(row.get("payload_json")),
             "benchmark": row.get("benchmark"),
             "timestamp": row.get("prediction_timestamp"),
             "duration": row.get("duration"),
@@ -1437,6 +1445,26 @@ async def upload_benchmark_predictions_jsonl(
 
             key = (doi, trigger)
             existing = existing_review_map.get(key, {})
+            payload_obj = ev.get("payload")
+            component_reasoning = ev.get("component_reasoning")
+            if payload_obj is None and isinstance(component_reasoning, dict):
+                payload_obj = component_reasoning.get("payload")
+            if payload_obj is None and isinstance(ev.get("extraction_result"), dict):
+                payload_obj = ev.get("extraction_result", {}).get("payload")
+
+            if isinstance(component_reasoning, (dict, list)):
+                component_reasoning_text = _truncate_cell(
+                    json.dumps(component_reasoning, ensure_ascii=False)
+                )
+            else:
+                component_reasoning_text = _truncate_cell(component_reasoning)
+
+            if isinstance(payload_obj, (dict, list)):
+                payload_json = _truncate_cell(
+                    json.dumps(payload_obj, ensure_ascii=False)
+                )
+            else:
+                payload_json = ""
 
             sanitized_chunks = []
             for ch in evidence_chunks[:10]:
@@ -1466,7 +1494,8 @@ async def upload_benchmark_predictions_jsonl(
                     ),
                     "model_label_raw": _safe_str(ev.get("label_raw")),
                     "reasoning": _truncate_cell(ev.get("reasoning")),
-                    "component_reasoning": _truncate_cell(ev.get("component_reasoning")),
+                    "component_reasoning": component_reasoning_text,
+                    "payload_json": payload_json,
                     "benchmark": ev.get("benchmark"),
                     "prediction_timestamp": _safe_str(ev.get("timestamp")),
                     "duration": _safe_str(ev.get("duration")),
