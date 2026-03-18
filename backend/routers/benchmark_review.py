@@ -71,16 +71,19 @@ def _safe_str(value: Any) -> str:
 
 
 def _normalize_reason_codes(raw: Any) -> List[str]:
+    def _clean(code: Any) -> str:
+        return str(code or "").strip()
+
     if raw is None:
         return []
     if isinstance(raw, str):
         parts = [p.strip() for p in raw.split(",")]
-        return [p for p in parts if p]
+        return [p for p in parts if p and p not in {"[]", "{}"}]
     if isinstance(raw, list):
         out: List[str] = []
         for item in raw:
-            text = str(item or "").strip()
-            if text:
+            text = _clean(item)
+            if text and text not in {"[]", "{}"}:
                 out.append(text)
         return out
     return []
@@ -114,6 +117,25 @@ def _normalize_evidence_chunks(raw: Any) -> List[Dict[str, Any]]:
         else:
             normalized.append({"text": _safe_str(item)})
     return normalized
+
+
+def _build_annotator_map_by_doi() -> Dict[str, str]:
+    if not state.worksheet:
+        return {}
+    try:
+        rows = state.worksheet.get_all_records()
+    except Exception:
+        return {}
+
+    annotator_map: Dict[str, str] = {}
+    for row in rows or []:
+        doi = str(row.get("doi") or row.get("DOI") or "").strip()
+        if not doi or doi in annotator_map:
+            continue
+        annotator = str(row.get("annotator") or row.get("Annotator") or "").strip()
+        if annotator:
+            annotator_map[doi] = annotator
+    return annotator_map
 
 
 def _normalize_incorrect_item(trigger_name: str, ev: Dict[str, Any]) -> Dict[str, Any]:
@@ -233,6 +255,7 @@ def _build_cache_from_review_sheet_rows(
     rows: List[Dict[str, Any]],
     source: Dict[str, Any],
     cache_key: float,
+    annotator_map: Optional[Dict[str, str]] = None,
 ) -> _BenchmarkCache:
     by_doi: Dict[str, Dict[str, Any]] = {}
     queue_tmp: Dict[str, Dict[str, Any]] = {}
@@ -255,8 +278,11 @@ def _build_cache_from_review_sheet_rows(
                 "summary": {},
                 "incorrect": [],
                 "incorrect_count": 0,
+                "annotator": "",
             },
         )
+        if annotator_map and not payload.get("annotator"):
+            payload["annotator"] = annotator_map.get(doi, "")
 
         incorrect_item_count += 1
         item = {
@@ -281,6 +307,7 @@ def _build_cache_from_review_sheet_rows(
             "reviewed_by": row.get("reviewed_by"),
             "reason_codes_json": row.get("reason_codes_json"),
             "comment": row.get("comment"),
+            "annotator": annotator_map.get(doi, "") if annotator_map else "",
         }
         payload["incorrect"].append(item)
         payload["incorrect_count"] = int(payload["incorrect_count"] or 0) + 1
@@ -362,10 +389,12 @@ def _load_benchmark_from_review_sheet() -> Optional[_BenchmarkCache]:
         "sheet": BENCHMARK_REVIEW_SHEET,
         "uploaded_at_utc": uploaded_at,
     }
+    annotator_map = _build_annotator_map_by_doi()
     return _build_cache_from_review_sheet_rows(
         rows=rows or [],
         source=source,
         cache_key=cache_key,
+        annotator_map=annotator_map,
     )
 
 

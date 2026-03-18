@@ -14,12 +14,56 @@ let selectedTriggerFilter = "";
 let selectedSheetLabel = "";
 
 const REASON_CHOICES = [
-  { id: "human_incorrect", label: "Human incorrect" },
-  { id: "ai_incorrect_retrieval", label: "AI incorrect (retrieval issue)" },
-  { id: "ai_incorrect_logic", label: "AI incorrect (logic error)" },
-  { id: "pes2o_error_no_full_text", label: "Pes2o error (no full_text)" },
-  { id: "pes2o_error_missing_content", label: "Pes2o error (missing content)" },
-  { id: "both_human_ai_incorrect", label: "Both human and AI incorrect" },
+  {
+    id: "human_gold_error",
+    label: "Human label / rubric incorrect",
+    subtitle: "The spreadsheet gold label or rubric interpretation is wrong.",
+  },
+  {
+    id: "doctype_gate_error",
+    label: "Doc-type gate error",
+    subtitle: "The paper was routed, run, or skipped by the wrong document-type gate.",
+  },
+  {
+    id: "retrieval_miss",
+    label: "Retrieval miss",
+    subtitle: "Relevant evidence exists in the paper but was not retrieved.",
+  },
+  {
+    id: "retrieval_wrong_evidence",
+    label: "Wrong evidence retrieved",
+    subtitle: "The context was present, but it was the wrong support for this field.",
+  },
+  {
+    id: "source_text_issue",
+    label: "Source text issue",
+    subtitle: "The PDF, OCR, markdown, or full text is degraded or incomplete.",
+  },
+  {
+    id: "extraction_payload_error",
+    label: "Extraction payload error",
+    subtitle: "The structured booleans or component payload are wrong.",
+  },
+  {
+    id: "adjudication_rule_error",
+    label: "Adjudication / rule error",
+    subtitle: "The extraction looked plausible, but rules or postprocess mapped it incorrectly.",
+  },
+  {
+    id: "prompt_reasoning_error",
+    label: "Prompt reasoning error",
+    subtitle: "The model saw relevant evidence but reasoned incorrectly from it.",
+  },
+  {
+    id: "ambiguous_case",
+    label: "Ambiguous case",
+    subtitle: "This looks genuinely unclear under the current rubric.",
+  },
+  {
+    id: "both_human_ai_incorrect",
+    label: "Both human and AI incorrect",
+    subtitle: "Use when the spreadsheet label and model output are both clearly wrong.",
+  },
 ];
 
 function escapeHtml(value) {
@@ -35,6 +79,26 @@ function escapeHtml(value) {
         "'": "&#39;",
       }[match] || match)
   );
+}
+
+function renderReasonChoice(choice, checkboxClass, disabled = false) {
+  return `
+    <label class="flex items-start gap-3 bg-black/20 rounded-lg px-3 py-2 border border-white/10 hover:border-white/20 cursor-pointer">
+      <input type="checkbox" class="${checkboxClass}" value="${escapeHtml(
+        choice.id
+      )}" ${disabled ? "disabled" : ""} />
+      <span class="min-w-0">
+        <span class="block text-sm text-gray-200">${escapeHtml(choice.label)}</span>
+        ${
+          choice.subtitle
+            ? `<span class="block text-[11px] leading-tight text-gray-400 mt-0.5">${escapeHtml(
+                choice.subtitle
+              )}</span>`
+            : ""
+        }
+      </span>
+    </label>
+  `;
 }
 
 function setLoading(isLoading) {
@@ -247,15 +311,19 @@ function renderQueueList(overview) {
   list.innerHTML = queue
     .map((item) => {
       const isActive = item.doi === selectedDoi;
-      const reviewed = item.fully_reviewed ? "Complete" : "In progress";
-      const reviewedClass = item.fully_reviewed
-        ? "text-emerald-300"
-        : "text-yellow-300";
+      const incorrectCount = item.incorrect_count ?? 0;
+      const submissionCount = item.submission_count ?? 0;
+      const reviewed =
+        submissionCount <= 0
+          ? "Not reviewed"
+          : `Reviews logged: ${submissionCount}`;
+      const reviewedClass =
+        submissionCount <= 0
+          ? "text-gray-300"
+          : "text-emerald-300";
       const activeClass = isActive
         ? "border-blue-400/60 bg-blue-500/10"
         : "border-white/10 bg-black/10 hover:bg-black/20";
-      const reviewedFieldCount = item.reviewed_field_count ?? 0;
-      const incorrectCount = item.incorrect_count ?? 0;
       const topReasons = Array.isArray(item.top_reasons) ? item.top_reasons : [];
       const topReasonsText = topReasons.length
         ? `Top reasons: ${topReasons
@@ -284,10 +352,10 @@ function renderQueueList(overview) {
               }
             </div>
             <div class="flex flex-col items-end shrink-0">
-              <div class="text-xs text-gray-400">Progress</div>
+              <div class="text-xs text-gray-400">Incorrect fields</div>
               <div class="text-lg font-bold text-white">${escapeHtml(
-                reviewedFieldCount
-              )}/${escapeHtml(incorrectCount)}</div>
+                incorrectCount
+              )}</div>
               <div class="text-[11px] ${reviewedClass}">${reviewed}${
         item.submission_count ? ` (${item.submission_count})` : ""
       }</div>
@@ -300,19 +368,24 @@ function renderQueueList(overview) {
 }
 
 function parseReasonCodes(value) {
+  const normalize = (items) =>
+    (items || [])
+      .map((item) => String(item || "").trim())
+      .filter((item) => item && item !== "[]" && item !== "{}");
+
   if (!value) return [];
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) return normalize(value);
   if (typeof value !== "string") return [];
   const trimmed = value.trim();
   if (!trimmed) return [];
   try {
     const parsed = JSON.parse(trimmed);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? normalize(parsed) : [];
   } catch (e) {
-    return trimmed
+    return normalize(
+      trimmed
       .split(",")
-      .map((p) => p.trim())
-      .filter(Boolean);
+    );
   }
 }
 
@@ -456,20 +529,14 @@ function renderDoiDetails(doiPayload, submissionsPayload, sheetConnected) {
   const dataset = doiPayload?.dataset || "";
   const docType = doiPayload?.doc_type || "";
   const incorrectCount = doiPayload?.incorrect_count ?? 0;
+  const annotator = String(doiPayload?.annotator || "").trim();
   const accuracy =
     typeof doiPayload?.summary?.accuracy === "number"
       ? (doiPayload.summary.accuracy * 100).toFixed(1) + "%"
       : "";
 
-  const bulkReasonsHtml = REASON_CHOICES.map(
-    (choice) => `
-      <label class="flex items-center gap-2 bg-black/20 rounded-lg px-3 py-2 border border-white/10 hover:border-white/20 cursor-pointer">
-        <input type="checkbox" class="benchmark-bulk-reason-checkbox" value="${escapeHtml(
-          choice.id
-        )}" ${sheetConnected ? "" : "disabled"} />
-        <span class="text-sm text-gray-200">${escapeHtml(choice.label)}</span>
-      </label>
-    `
+  const bulkReasonsHtml = REASON_CHOICES.map((choice) =>
+    renderReasonChoice(choice, "benchmark-bulk-reason-checkbox", !sheetConnected)
   ).join("");
 
   const items = (doiPayload?.incorrect || []).map((item) => {
@@ -489,15 +556,8 @@ function renderDoiDetails(doiPayload, submissionsPayload, sheetConnected) {
       ? Object.entries(payload).filter(([key]) => key !== "reasoning")
       : [];
 
-    const reasonsHtml = REASON_CHOICES.map(
-      (choice) => `
-        <label class="flex items-center gap-2 bg-black/20 rounded-lg px-3 py-2 border border-white/10 hover:border-white/20 cursor-pointer">
-          <input type="checkbox" class="benchmark-reason-checkbox" value="${escapeHtml(
-            choice.id
-          )}" ${sheetConnected ? "" : "disabled"} />
-          <span class="text-sm text-gray-200">${escapeHtml(choice.label)}</span>
-        </label>
-      `
+    const reasonsHtml = REASON_CHOICES.map((choice) =>
+      renderReasonChoice(choice, "benchmark-reason-checkbox", !sheetConnected)
     ).join("");
 
     const chunksBlock = chunks.length
@@ -689,6 +749,13 @@ function renderDoiDetails(doiPayload, submissionsPayload, sheetConnected) {
           <div class="text-sm text-gray-400 truncate">${escapeHtml(dataset)}${
     docType ? ` • ${escapeHtml(docType)}` : ""
   }</div>
+          ${
+            annotator
+              ? `<div class="text-xs text-gray-500 mt-1">Annotator: ${escapeHtml(
+                  annotator
+                )}</div>`
+              : ""
+          }
         </div>
         <div class="flex gap-3 flex-wrap">
           <div class="bg-black/20 rounded-lg px-3 py-2 border border-white/10">
