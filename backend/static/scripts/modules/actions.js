@@ -363,6 +363,11 @@ export function initializeActions(_state) {
             detail: { active: false, hasTemplate: false },
           })
         );
+        document.dispatchEvent(
+          new CustomEvent("sheetChanged", {
+            detail: { sheetId: "", dataset: "" },
+          })
+        );
         return;
       }
 
@@ -440,6 +445,14 @@ export function initializeActions(_state) {
           dom.datasetSelector.value = lastDataset;
           dom.datasetSelector.dispatchEvent(new Event("change"));
         }
+        document.dispatchEvent(
+          new CustomEvent("sheetChanged", {
+            detail: {
+              sheetId: selectedSheetId,
+              dataset: state.currentDataset || "",
+            },
+          })
+        );
         ui.showToastNotification("Connected to sheet.", "success");
       } catch (error) {
         const message = error?.message || String(error) || "Unknown error";

@@ -1,4 +1,5 @@
 import * as api from "../api.js";
+import * as dom from "../domElements.js";
 import * as ui from "../ui.js";
 
 let state = {};
@@ -10,6 +11,7 @@ let selectedDoi = null;
 let selectedQueueFilter = "";
 let selectedReasonFilter = "";
 let selectedTriggerFilter = "";
+let selectedSheetLabel = "";
 
 const REASON_CHOICES = [
   { id: "human_incorrect", label: "Human incorrect" },
@@ -140,7 +142,8 @@ function getFilteredQueue(queue) {
     const doi = String(item.doi || "").toLowerCase();
     const dataset = String(item.dataset || "").toLowerCase();
     const docType = String(item.doc_type || "").toLowerCase();
-    const matchesSearch = !q || doi.includes(q) || dataset.includes(q) || docType.includes(q);
+    const matchesSearch =
+      !q || doi.includes(q) || dataset.includes(q) || docType.includes(q);
     const reason = String(selectedReasonFilter || "").trim();
     const trigger = String(selectedTriggerFilter || "").trim();
     const matchesReason =
@@ -157,9 +160,43 @@ function renderActiveFilters() {
   const el = document.getElementById("benchmark-active-filters");
   if (!el) return;
   const parts = [];
+  if (selectedSheetLabel) parts.push(`Sheet: ${selectedSheetLabel}`);
   if (selectedReasonFilter) parts.push(`Reason: ${selectedReasonFilter}`);
   if (selectedTriggerFilter) parts.push(`Field: ${selectedTriggerFilter}`);
   el.textContent = parts.length ? parts.join(" • ") : "";
+}
+
+async function renderSheetSelector() {
+  const sheetSelect = document.getElementById("benchmark-sheet-selector");
+  if (!sheetSelect) return;
+
+  const sheets = await api.getSheets().catch(() => []);
+  const currentSheetId = String(state.currentSheetId || "").trim();
+  const currentSheet = sheets.find((sheet) => String(sheet.id || "") === currentSheetId);
+
+  sheetSelect.innerHTML = sheets.length
+    ? sheets
+        .map(
+          (sheet) =>
+            `<option value="${escapeHtml(sheet.id)}">${escapeHtml(
+              sheet.name || sheet.id
+            )}</option>`
+        )
+        .join("")
+    : '<option value="">No sheets configured</option>';
+
+  if (currentSheetId && sheets.some((sheet) => String(sheet.id || "") === currentSheetId)) {
+    sheetSelect.value = currentSheetId;
+    selectedSheetLabel = currentSheet?.name || currentSheetId;
+  } else if (sheets.length === 1) {
+    sheetSelect.value = String(sheets[0].id || "");
+    selectedSheetLabel = sheets[0].name || String(sheets[0].id || "");
+  } else {
+    sheetSelect.value = "";
+    selectedSheetLabel = "";
+  }
+
+  renderActiveFilters();
 }
 
 function renderExploreFilters(overview) {
@@ -749,6 +786,20 @@ function pickNextUnreviewed(overview) {
   return next?.doi || (queue[0] ? queue[0].doi : null);
 }
 
+function showEmptyDetails(message) {
+  const details = document.getElementById("benchmark-doi-details");
+  const placeholder = document.getElementById(
+    "benchmark-doi-details-placeholder"
+  );
+  if (!details || !placeholder) return;
+  selectedDoi = null;
+  details.classList.add("hidden");
+  placeholder.classList.remove("hidden");
+  placeholder.innerHTML = `<p class="text-gray-300">${escapeHtml(
+    message || "Select a DOI to begin reviewing."
+  )}</p>`;
+}
+
 function getBulkSelection() {
   const reasonCodes = Array.from(
     document.querySelectorAll(".benchmark-bulk-reason-checkbox:checked")
@@ -777,6 +828,18 @@ function setupEventListeners() {
       selectedQueueFilter = search.value || "";
       renderQueueList(overviewCache);
       renderActiveFilters();
+    });
+  }
+
+  const sheetFilter = document.getElementById("benchmark-sheet-selector");
+  if (sheetFilter) {
+    sheetFilter.addEventListener("change", async () => {
+      const selectedSheetId = sheetFilter.value || "";
+      if (!selectedSheetId || !dom.sheetSelector) return;
+      if (dom.sheetSelector.value !== selectedSheetId) {
+        dom.sheetSelector.value = selectedSheetId;
+      }
+      dom.sheetSelector.dispatchEvent(new Event("change", { bubbles: true }));
     });
   }
 
@@ -814,6 +877,16 @@ function setupEventListeners() {
       renderActiveFilters();
     });
   }
+
+  document.addEventListener("sheetChanged", async (event) => {
+    const detail = event.detail || {};
+    selectedSheetLabel = detail.sheetName || detail.sheetLabel || "";
+    await renderSheetSelector();
+    if (!document.getElementById("reviews-view")?.classList.contains("hidden")) {
+      selectedDoi = null;
+      await loadData({ autoLoadDoi: true });
+    }
+  });
 
   document.body.addEventListener("click", (e) => {
     const chip = e.target.closest(".benchmark-reason-chip");
@@ -1068,6 +1141,7 @@ async function loadData({ keepDoi = false, autoLoadDoi = true } = {}) {
   try {
     overviewCache = await api.getBenchmarkReviewsOverview();
     setLoading(false);
+    await renderSheetSelector();
     renderStats(overviewCache);
     renderExploreFilters(overviewCache);
     renderQueueList(overviewCache);
@@ -1099,6 +1173,12 @@ async function loadData({ keepDoi = false, autoLoadDoi = true } = {}) {
 
       if (doiToLoad) {
         await loadDoi(doiToLoad);
+      } else {
+        showEmptyDetails(
+          selectedSheetLabel
+            ? `No benchmark predictions found for "${selectedSheetLabel}".`
+            : "Select a DOI to begin reviewing."
+        );
       }
     }
   } catch (error) {

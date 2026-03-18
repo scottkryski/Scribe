@@ -678,6 +678,12 @@
                     <!-- Left: Queue + Stats -->
                     <div class="space-y-4">
                         <div class="glass-effect rounded-2xl p-4 border border-white/10">
+                            <div class="mb-3">
+                                <div class="text-xs uppercase tracking-wide text-gray-400 mb-2">Spreadsheet</div>
+                                <select id="benchmark-sheet-selector" class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white border border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="">Select a sheet</option>
+                                </select>
+                            </div>
                             <div class="flex items-center gap-2 mb-3">
                                 <input id="benchmark-review-search" type="text" placeholder="Search DOI / dataset..." class="w-full p-2 bg-black bg-opacity-20 rounded-lg text-white placeholder-gray-400 border border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <button id="benchmark-next-unreviewed-btn" class="btn-primary bg-blue-600 hover:bg-blue-700 whitespace-nowrap">Next</button>
