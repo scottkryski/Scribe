@@ -402,6 +402,63 @@ function safeJsonParse(value) {
   }
 }
 
+function parseReviewHistory(value) {
+  const parsed = safeJsonParse(value);
+  return Array.isArray(parsed)
+    ? parsed.filter((item) => item && typeof item === "object")
+    : [];
+}
+
+function buildSubmissionsFromSheetRows(sheetRows, doi, triggerName = "") {
+  const doiKey = String(doi || "").trim();
+  const triggerKey = String(triggerName || "").trim();
+  const rows = [];
+
+  (sheetRows || []).forEach((row) => {
+    const rowDoi = String(row?.doi || "").trim();
+    if (!rowDoi || rowDoi !== doiKey) return;
+    const rowTrigger = String(row?.trigger_name || "").trim();
+    if (triggerKey && rowTrigger !== triggerKey) return;
+
+    const history = parseReviewHistory(row?.review_history_json);
+    if (history.length) {
+      history.forEach((entry) => {
+        const codesValue =
+          entry.reason_codes_json !== undefined
+            ? entry.reason_codes_json
+            : entry.reason_codes;
+        rows.push({
+          timestamp_utc: String(entry.timestamp_utc || entry.timestamp || ""),
+          reviewed_by: String(entry.reviewed_by || ""),
+          doi: rowDoi,
+          trigger_name: rowTrigger,
+          reason_codes_json: Array.isArray(codesValue) || typeof codesValue === "object"
+            ? JSON.stringify(codesValue)
+            : String(codesValue || "[]"),
+          comment: String(entry.comment || ""),
+        });
+      });
+      return;
+    }
+
+    const reviewCount = Number.parseInt(String(row?.review_count || "0"), 10) || 0;
+    const reasonCodes = String(row?.reason_codes_json || "").trim();
+    if (reviewCount > 0 || reasonCodes) {
+      rows.push({
+        timestamp_utc: String(row.reviewed_at_utc || row.timestamp_utc || ""),
+        reviewed_by: String(row.reviewed_by || ""),
+        doi: rowDoi,
+        trigger_name: rowTrigger,
+        reason_codes_json: reasonCodes || "[]",
+        comment: String(row.comment || ""),
+      });
+    }
+  });
+
+  rows.sort((a, b) => String(a.timestamp_utc || "").localeCompare(String(b.timestamp_utc || "")));
+  return { rows };
+}
+
 function formatPayloadKey(key) {
   return String(key || "")
     .replace(/_/g, " ")
@@ -828,8 +885,25 @@ async function loadDoi(doi) {
   }
 
   try {
-    const doiPayload = await api.getBenchmarkReviewsForDoi(doi);
-    const submissions = await api.getBenchmarkReviewSubmissions(doi);
+    const doiPayload =
+      overviewCache?.dois?.[doi] ||
+      overviewCache?.by_doi?.[doi] ||
+      null;
+    const submissions =
+      buildSubmissionsFromSheetRows(overviewCache?.sheet_rows || [], doi);
+
+    if (!doiPayload) {
+      const fetchedDoiPayload = await api.getBenchmarkReviewsForDoi(doi);
+      const fetchedSubmissions = await api.getBenchmarkReviewSubmissions(doi);
+      renderDoiDetails(
+        fetchedDoiPayload,
+        fetchedSubmissions,
+        Boolean(overviewCache?.sheet_connected)
+      );
+      renderSubmissionsForDoi(fetchedSubmissions);
+      return;
+    }
+
     renderDoiDetails(
       doiPayload,
       submissions,

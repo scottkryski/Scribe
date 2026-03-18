@@ -29,6 +29,7 @@ IDEAL_BENCHMARK_REVIEW_HEADERS = [
     "doi",
     "dataset",
     "doc_type",
+    "annotator",
     "trigger_name",
     "human_label",
     "model_label",
@@ -167,6 +168,7 @@ class _BenchmarkCache:
     mtime: float
     queue: List[Dict[str, Any]]
     by_doi: Dict[str, Dict[str, Any]]
+    sheet_rows: List[Dict[str, Any]]
     incorrect_item_count: int
     source: Dict[str, Any]
 
@@ -255,7 +257,6 @@ def _build_cache_from_review_sheet_rows(
     rows: List[Dict[str, Any]],
     source: Dict[str, Any],
     cache_key: float,
-    annotator_map: Optional[Dict[str, str]] = None,
 ) -> _BenchmarkCache:
     by_doi: Dict[str, Dict[str, Any]] = {}
     queue_tmp: Dict[str, Dict[str, Any]] = {}
@@ -278,11 +279,8 @@ def _build_cache_from_review_sheet_rows(
                 "summary": {},
                 "incorrect": [],
                 "incorrect_count": 0,
-                "annotator": "",
             },
         )
-        if annotator_map and not payload.get("annotator"):
-            payload["annotator"] = annotator_map.get(doi, "")
 
         incorrect_item_count += 1
         item = {
@@ -307,7 +305,7 @@ def _build_cache_from_review_sheet_rows(
             "reviewed_by": row.get("reviewed_by"),
             "reason_codes_json": row.get("reason_codes_json"),
             "comment": row.get("comment"),
-            "annotator": annotator_map.get(doi, "") if annotator_map else "",
+            "annotator": row.get("annotator"),
         }
         payload["incorrect"].append(item)
         payload["incorrect_count"] = int(payload["incorrect_count"] or 0) + 1
@@ -346,6 +344,7 @@ def _build_cache_from_review_sheet_rows(
         mtime=cache_key,
         queue=queue,
         by_doi=by_doi,
+        sheet_rows=list(rows or []),
         incorrect_item_count=incorrect_item_count,
         source=source,
     )
@@ -389,13 +388,12 @@ def _load_benchmark_from_review_sheet() -> Optional[_BenchmarkCache]:
         "sheet": BENCHMARK_REVIEW_SHEET,
         "uploaded_at_utc": uploaded_at,
     }
-    annotator_map = _build_annotator_map_by_doi()
     return _build_cache_from_review_sheet_rows(
         rows=rows or [],
         source=source,
         cache_key=cache_key,
-        annotator_map=annotator_map,
     )
+
 
 
 def _load_benchmark_from_file() -> Optional[_BenchmarkCache]:
@@ -470,11 +468,10 @@ def _load_benchmark_from_file() -> Optional[_BenchmarkCache]:
         mtime=mtime,
         queue=queue,
         by_doi=by_doi,
+        sheet_rows=[],
         incorrect_item_count=incorrect_item_count,
         source={"type": "file", "file": str(REVIEW_FILE), "mtime": mtime},
     )
-
-
 def _load_benchmark_cache() -> _BenchmarkCache:
     global _BENCHMARK_CACHE
 
@@ -714,11 +711,10 @@ async def get_benchmark_reviews_overview():
             },
             "recent_submissions": [],
         }
-    headers, sheet_rows = _read_benchmark_review_sheet_rows()
-
+    sheet_rows = cache.sheet_rows or []
     review_entries: List[Dict[str, Any]] = []
     uploaded_at = ""
-    if _is_benchmark_review_table(headers) and sheet_rows:
+    if sheet_rows:
         uploaded_at = str(sheet_rows[0].get("upload_uploaded_at_utc") or "").strip()
         for row in sheet_rows:
             review_entries.extend(_history_entries_from_table_row(row))
@@ -833,6 +829,8 @@ async def get_benchmark_reviews_overview():
             "incorrect_item_count": cache.incorrect_item_count,
         },
         "queue": queue,
+        "dois": cache.by_doi,
+        "sheet_rows": sheet_rows,
         "stats": {
             **submission_summary,
             "queue_dois": len(queue),
@@ -862,25 +860,13 @@ async def get_benchmark_review_submissions(
     doi: Optional[str] = Query(default=None),
     trigger_name: Optional[str] = Query(default=None),
 ):
-    headers, sheet_rows = _read_benchmark_review_sheet_rows()
+    cache = _load_benchmark_cache()
+    sheet_rows = cache.sheet_rows or []
     doi_key = str(doi).strip() if doi else None
     trigger_key = str(trigger_name).strip() if trigger_name else None
 
     if not sheet_rows:
         return {"rows": []}
-
-    if not _is_benchmark_review_table(headers):
-        # Legacy behavior: rows are already review submissions.
-        rows = sheet_rows
-        if doi_key:
-            rows = [r for r in rows if str(r.get("doi") or "").strip() == doi_key]
-        if trigger_key:
-            rows = [
-                r
-                for r in rows
-                if str(r.get("trigger_name") or "").strip() == trigger_key
-            ]
-        return {"rows": rows}
 
     entries: List[Dict[str, Any]] = []
     for row in sheet_rows:
@@ -1365,6 +1351,7 @@ async def upload_benchmark_predictions_jsonl(
     line_count = 0
     incorrect_item_count = 0
     chunk_count = 0
+    annotator_map = _build_annotator_map_by_doi()
 
     # Preserve existing reviews (either from the new table or the legacy submissions table).
     existing_ws = _get_worksheet_if_exists(BENCHMARK_REVIEW_SHEET)
@@ -1514,6 +1501,12 @@ async def upload_benchmark_predictions_jsonl(
                     "doi": doi,
                     "dataset": _safe_str(dataset),
                     "doc_type": _safe_str(doc_type),
+                    "annotator": _safe_str(
+                        ev.get("annotator")
+                        or record.get("annotator")
+                        or record.get("Annotator")
+                        or annotator_map.get(doi, "")
+                    ),
                     "trigger_name": trigger,
                     "human_label": _safe_str(ev.get("human_label")),
                     "model_label": _safe_str(
